@@ -144,7 +144,7 @@ async function executeWebSearch(query: string): Promise<string> {
     // Format results for Claude
     const formatted = results.results
       .slice(0, 8)
-      .map((r, i: number) => {
+      .map((r: { title: string; url: string; description: string }, i: number) => {
         return `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.description}`;
       })
       .join('\n\n');
