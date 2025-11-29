@@ -459,9 +459,14 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 12px 16px;
-  margin-bottom: 8px;
+  margin: 12px 0;
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+/* Inline tool use (appears within message content flow) */
+.tool-use-block.tool-use-inline {
+  display: block;
 }
 
 .tool-use-header {
@@ -510,7 +515,7 @@ body {
 }
 
 .message-content.markdown p {
-  margin-bottom: 8px;
+  margin-bottom: 2px;
 }
 
 .message-content.markdown p:last-child {
@@ -548,12 +553,16 @@ body {
 
 .message-content.markdown ul,
 .message-content.markdown ol {
-  margin: 12px 0;
+  margin: 4px 0;
   padding-left: 24px;
 }
 
 .message-content.markdown li {
-  margin-bottom: 4px;
+  margin-bottom: 1px;
+}
+
+.message-content.markdown li p {
+  margin-bottom: 0;
 }
 
 .message-content.markdown blockquote {

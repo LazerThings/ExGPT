@@ -80,6 +80,19 @@ async function loadData() {
 
 // Setup event listeners
 function setupEventListeners() {
+  // Detect user scroll during streaming
+  const messagesContainer = document.getElementById('messages-container');
+  messagesContainer.addEventListener('scroll', () => {
+    if (isLoading) {
+      const isAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 50;
+      if (!isAtBottom) {
+        userScrolledDuringStream = true;
+      } else {
+        userScrolledDuringStream = false;
+      }
+    }
+  });
+
   // Sidebar toggles
   toggleLeftSidebarBtn.addEventListener('click', () => {
     leftSidebar.classList.toggle('open');
@@ -102,8 +115,8 @@ function setupEventListeners() {
     updateOverlay();
   });
 
-  // New chat
-  newChatBtn.addEventListener('click', createNewChat);
+  // New chat button - shows the welcome/home screen
+  newChatBtn.addEventListener('click', showNewChatScreen);
 
   // Settings
   settingsBtn.addEventListener('click', () => {
@@ -206,10 +219,10 @@ function setupKeyboardShortcuts() {
     const isTyping = document.activeElement.tagName === 'INPUT' ||
                      document.activeElement.tagName === 'TEXTAREA';
 
-    // Cmd/Ctrl+N - New chat
+    // Cmd/Ctrl+N - New chat (show welcome screen)
     if (modKey && e.key === 'n') {
       e.preventDefault();
-      createNewChat();
+      showNewChatScreen();
       return;
     }
 
@@ -328,14 +341,24 @@ function renderChatList() {
   });
 }
 
-// Create new chat
+// Show new chat screen (welcome/home page)
+function showNewChatScreen() {
+  currentChatId = null;
+  currentChatTitle.textContent = 'ExGPT';
+  welcomeScreen.classList.remove('hidden');
+  messagesDiv.classList.add('hidden');
+  messagesDiv.innerHTML = '';
+  renderChatList();
+  leftSidebar.classList.remove('open');
+  updateOverlay();
+}
+
+// Create new chat (called when user sends first message)
 async function createNewChat() {
   const chat = await window.api.createChat('New Chat');
   chats.unshift(chat);
   selectChat(chat.id);
   renderChatList();
-  leftSidebar.classList.remove('open');
-  updateOverlay();
 }
 
 // Select chat
@@ -569,6 +592,7 @@ async function submitEditedMessage(messageIndex, newContent) {
   if (isLoading) return;
 
   isLoading = true;
+  toolInsertions = []; // Reset tool insertions
   sendBtn.disabled = true;
 
   try {
@@ -636,6 +660,7 @@ async function regenerateMessage(messageIndex) {
   if (isLoading) return;
 
   isLoading = true;
+  toolInsertions = []; // Reset tool insertions
   sendBtn.disabled = true;
 
   // Remove the message and all after it from UI
@@ -709,6 +734,9 @@ function isValidHtmlDocument(html) {
          trimmed.includes('</html>');
 }
 
+// Store blob URLs for cleanup and reload
+const liveHtmlBlobs = new Map();
+
 // Create live HTML frame
 function createLiveHtmlFrame(htmlContent, frameId) {
   const isValid = isValidHtmlDocument(htmlContent);
@@ -720,6 +748,13 @@ function createLiveHtmlFrame(htmlContent, frameId) {
     </div>`;
   }
 
+  // Create blob URL to bypass CSP restrictions
+  const blob = new Blob([htmlContent], { type: 'text/html' });
+  const blobUrl = URL.createObjectURL(blob);
+
+  // Store for reload functionality
+  liveHtmlBlobs.set(frameId, { content: htmlContent, url: blobUrl });
+
   return `<div class="live-html-container" data-frame-id="${frameId}">
     <div class="live-html-header">
       <span><i class="ph ph-code"></i> Live HTML Preview</span>
@@ -727,7 +762,7 @@ function createLiveHtmlFrame(htmlContent, frameId) {
         <i class="ph ph-arrow-clockwise"></i> Reload
       </button>
     </div>
-    <iframe id="${frameId}" class="live-html-frame" sandbox="allow-scripts allow-same-origin" srcdoc="${escapeHtmlAttribute(htmlContent)}"></iframe>
+    <iframe id="${frameId}" class="live-html-frame" src="${blobUrl}"></iframe>
   </div>`;
 }
 
@@ -739,19 +774,18 @@ function createLiveHtmlLoading() {
   </div>`;
 }
 
-// Escape HTML for use in srcdoc attribute (only escape quotes, not angle brackets)
-function escapeHtmlAttribute(text) {
-  return text
-    .replace(/"/g, '&quot;');
-}
-
 // Reload live frame
 window.reloadLiveFrame = function(frameId) {
   const frame = document.getElementById(frameId);
-  if (frame) {
-    const srcdoc = frame.getAttribute('srcdoc');
-    frame.removeAttribute('srcdoc');
-    setTimeout(() => frame.setAttribute('srcdoc', srcdoc), 0);
+  const stored = liveHtmlBlobs.get(frameId);
+  if (frame && stored) {
+    // Revoke old blob URL
+    URL.revokeObjectURL(stored.url);
+    // Create new blob URL
+    const blob = new Blob([stored.content], { type: 'text/html' });
+    const newUrl = URL.createObjectURL(blob);
+    stored.url = newUrl;
+    frame.src = newUrl;
   }
 };
 
@@ -808,7 +842,14 @@ function renderMarkdownContent(text, isStreaming = false) {
   // Fenced code blocks with language
   const syntaxHighlightEnabled = settings.enabledToggles.includes('syntaxhighlight');
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    const codeContent = code.trim();
+    // Unescape HTML entities for proper highlighting (content was escaped earlier)
+    const codeContent = code.trim()
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+
     if (syntaxHighlightEnabled && typeof hljs !== 'undefined' && lang) {
       try {
         // Try to highlight with the specified language
@@ -820,7 +861,9 @@ function renderMarkdownContent(text, isStreaming = false) {
           const highlighted = hljs.highlightAuto(codeContent);
           return `<pre><code class="hljs">${highlighted.value}</code></pre>`;
         } catch (e2) {
-          return `<pre><code class="language-${lang}">${codeContent}</code></pre>`;
+          // Re-escape for non-highlighted display
+          const escaped = codeContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          return `<pre><code class="language-${lang}">${escaped}</code></pre>`;
         }
       }
     } else if (syntaxHighlightEnabled && typeof hljs !== 'undefined') {
@@ -829,10 +872,13 @@ function renderMarkdownContent(text, isStreaming = false) {
         const highlighted = hljs.highlightAuto(codeContent);
         return `<pre><code class="hljs">${highlighted.value}</code></pre>`;
       } catch (e) {
-        return `<pre><code>${codeContent}</code></pre>`;
+        const escaped = codeContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return `<pre><code>${escaped}</code></pre>`;
       }
     }
-    return `<pre><code class="language-${lang}">${codeContent}</code></pre>`;
+    // Re-escape for non-highlighted display
+    const escaped = codeContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<pre><code class="language-${lang}">${escaped}</code></pre>`;
   });
 
   // Inline code (must come after code blocks)
@@ -897,11 +943,13 @@ function renderMarkdownContent(text, isStreaming = false) {
   // Ordered lists
   html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
 
-  // Wrap consecutive list items
-  html = html.replace(/(<li class="task-item[^"]*">.*<\/li>\n?)+/g, '<ul class="task-list">$&</ul>');
+  // Wrap consecutive list items (remove newlines inside lists to prevent <br> insertion)
+  html = html.replace(/(<li class="task-item[^"]*">.*<\/li>\n?)+/g, (match) => {
+    return '<ul class="task-list">' + match.replace(/\n/g, '') + '</ul>';
+  });
   html = html.replace(/(<li>.*<\/li>\n?)+/g, (match) => {
     if (!match.includes('task-list')) {
-      return '<ul>' + match + '</ul>';
+      return '<ul>' + match.replace(/\n/g, '') + '</ul>';
     }
     return match;
   });
@@ -984,6 +1032,8 @@ async function sendMessage() {
   scrollToBottom();
 
   isLoading = true;
+  userScrolledDuringStream = false; // Reset scroll tracking for new message
+  toolInsertions = []; // Reset tool insertions for new message
   sendBtn.disabled = true;
 
   // Generate title in background for first message
@@ -1045,6 +1095,13 @@ async function sendMessage() {
   scrollToBottom();
 }
 
+// Track if user has scrolled up during streaming
+let userScrolledDuringStream = false;
+let lastScrollTop = 0;
+
+// Track tool insertions by character position in the stream
+let toolInsertions = []; // Array of { position: number, element: HTMLElement }
+
 // Update streaming message
 function updateStreamingMessage(fullMessage) {
   const streamingEl = document.getElementById('streaming-message');
@@ -1053,13 +1110,63 @@ function updateStreamingMessage(fullMessage) {
     const contentEl = streamingEl.querySelector('.message-content');
     contentEl.className = `message-content${renderMarkdown ? ' markdown' : ''}`;
 
-    if (renderMarkdown) {
-      contentEl.innerHTML = renderMarkdownContent(fullMessage, true); // isStreaming = true
+    // Store raw content for copy functionality
+    streamingEl._rawContent = fullMessage;
+
+    // If we have tool insertions, we need to split the content and insert tools at correct positions
+    if (toolInsertions.length > 0) {
+      // Sort by position
+      const sortedInsertions = [...toolInsertions].sort((a, b) => a.position - b.position);
+
+      // Build content with tool blocks inserted at correct positions
+      let lastPos = 0;
+      const fragments = [];
+
+      for (const insertion of sortedInsertions) {
+        // Get text before this tool insertion
+        const textBefore = fullMessage.substring(lastPos, insertion.position);
+        if (textBefore) {
+          const span = document.createElement('span');
+          if (renderMarkdown) {
+            span.innerHTML = renderMarkdownContent(textBefore, true);
+          } else {
+            span.textContent = textBefore;
+          }
+          fragments.push(span);
+        }
+        // Add the tool block
+        fragments.push(insertion.element);
+        lastPos = insertion.position;
+      }
+
+      // Get remaining text after last tool
+      const textAfter = fullMessage.substring(lastPos);
+      if (textAfter) {
+        const span = document.createElement('span');
+        if (renderMarkdown) {
+          span.innerHTML = renderMarkdownContent(textAfter, true);
+        } else {
+          span.textContent = textAfter;
+        }
+        fragments.push(span);
+      }
+
+      // Clear and rebuild content
+      contentEl.innerHTML = '';
+      fragments.forEach(f => contentEl.appendChild(f));
     } else {
-      contentEl.textContent = fullMessage;
+      // No tool insertions, render normally
+      if (renderMarkdown) {
+        contentEl.innerHTML = renderMarkdownContent(fullMessage, true);
+      } else {
+        contentEl.textContent = fullMessage;
+      }
     }
 
-    scrollToBottom();
+    // Only auto-scroll if user hasn't scrolled up
+    if (!userScrolledDuringStream) {
+      scrollToBottom();
+    }
   }
 }
 
@@ -1070,15 +1177,39 @@ function finalizeStreamingMessage() {
     streamingEl.removeAttribute('id');
     streamingEl.classList.remove('streaming');
 
-    // Re-render to add actions
-    const chat = chats.find(c => c.id === currentChatId);
-    if (chat) {
-      renderMessages(chat.messages);
-    }
+    // Get the message content for action buttons
+    const contentEl = streamingEl.querySelector('.message-content');
+    const messageContent = contentEl ? contentEl.textContent || '' : '';
+
+    // Find the message index - count existing messages
+    const existingMessages = messagesDiv.querySelectorAll('.message:not(.streaming)');
+    const messageIndex = existingMessages.length - 1; // -1 because this message is now part of the count
+
+    // Add action buttons
+    const actionsEl = document.createElement('div');
+    actionsEl.className = 'message-actions';
+    actionsEl.innerHTML = `
+      <button class="message-action-btn copy-btn" title="Copy">
+        <i class="ph ph-copy"></i>
+      </button>
+      <button class="message-action-btn regenerate-btn" title="Regenerate">
+        <i class="ph ph-arrow-clockwise"></i>
+      </button>
+    `;
+
+    // Get the raw text content from the message for copying
+    const rawContent = streamingEl._rawContent || messageContent;
+    actionsEl.querySelector('.copy-btn').addEventListener('click', () => copyMessage(rawContent));
+    actionsEl.querySelector('.regenerate-btn').addEventListener('click', () => regenerateMessage(messageIndex));
+
+    streamingEl.appendChild(actionsEl);
+    streamingEl.dataset.index = messageIndex;
   }
 
   isLoading = false;
   sendBtn.disabled = false;
+  userScrolledDuringStream = false; // Reset scroll tracking
+  toolInsertions = []; // Clear tool insertions
 }
 
 // Show thinking block
@@ -1103,22 +1234,22 @@ function showThinkingBlock(thinking) {
   }
 }
 
-// Show tool use indicator
+// Show tool use indicator - inserts inline at current position in the message
 function showToolUse(tools) {
   const streamingEl = document.getElementById('streaming-message');
   if (streamingEl) {
-    let toolEl = streamingEl.querySelector('.tool-use-block');
-    if (!toolEl) {
-      toolEl = document.createElement('div');
-      toolEl.className = 'tool-use-block';
-      streamingEl.insertBefore(toolEl, streamingEl.firstChild);
-    }
+    // Get the current position in the stream (length of raw content so far)
+    const currentPosition = streamingEl._rawContent ? streamingEl._rawContent.length : 0;
+
+    // Create a new tool block
+    const toolEl = document.createElement('div');
+    toolEl.className = 'tool-use-block tool-use-inline';
 
     const toolNames = tools.map(t => {
-      const icon = t.name === 'web_search' ? 'ph-magnifying-glass' : 'ph-globe-simple';
-      const displayName = t.name === 'web_search' ? 'Searching' : 'Fetching';
-      const query = t.name === 'web_search' ? t.input.query : t.input.url;
-      return `<div class="tool-use-item"><i class="ph ${icon}"></i> ${displayName}: ${query}</div>`;
+      const icon = 'ph-globe-simple';
+      const displayName = 'Fetching';
+      const target = t.input.url;
+      return `<div class="tool-use-item"><i class="ph ${icon}"></i> ${displayName}: ${target}</div>`;
     }).join('');
 
     toolEl.innerHTML = `
@@ -1128,6 +1259,15 @@ function showToolUse(tools) {
       </div>
       <div class="tool-use-content">${toolNames}</div>
     `;
+
+    // Record this tool insertion with its position
+    toolInsertions.push({ position: currentPosition, element: toolEl });
+
+    // Immediately append to show it (will be repositioned on next update)
+    const contentEl = streamingEl.querySelector('.message-content');
+    if (contentEl) {
+      contentEl.appendChild(toolEl);
+    }
     scrollToBottom();
   }
 }

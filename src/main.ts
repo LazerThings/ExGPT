@@ -2,7 +2,6 @@ import { app, BrowserWindow, ipcMain, safeStorage, net } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import Anthropic from '@anthropic-ai/sdk';
-import { search, SafeSearchType } from 'duck-duck-scrape';
 
 let mainWindow: BrowserWindow | null = null;
 let anthropicClient: Anthropic | null = null;
@@ -82,12 +81,6 @@ const TOGGLES: Toggle[] = [
     prompt: '',
   },
   {
-    name: 'websearch',
-    displayName: 'Web Search',
-    icon: 'ph-magnifying-glass',
-    prompt: 'You have access to a web_search tool that lets you search the internet using DuckDuckGo. Use it when you need current information, facts you\'re unsure about, or when the user asks about recent events.',
-  },
-  {
     name: 'webfetch',
     displayName: 'Web Fetch',
     icon: 'ph-globe-simple',
@@ -97,20 +90,6 @@ const TOGGLES: Toggle[] = [
 
 // Tool definitions for Claude
 const TOOLS: Anthropic.Tool[] = [
-  {
-    name: 'web_search',
-    description: 'Search the web using DuckDuckGo. Returns search results with titles, URLs, and snippets. Use this to find current information, facts, or recent events.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        query: {
-          type: 'string',
-          description: 'The search query',
-        },
-      },
-      required: ['query'],
-    },
-  },
   {
     name: 'web_fetch',
     description: 'Fetch and read the content of a web page. Returns the text content of the page. Use this to read specific URLs or get more details from search results.',
@@ -126,28 +105,6 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
 ];
-
-// Execute web search tool
-async function executeWebSearch(query: string): Promise<string> {
-  try {
-    const results = await search(query, { safeSearch: SafeSearchType.MODERATE });
-    if (!results.results || results.results.length === 0) {
-      return 'No search results found.';
-    }
-
-    // Format results for Claude
-    const formatted = results.results
-      .slice(0, 8)
-      .map((r: { title: string; url: string; description: string }, i: number) => {
-        return `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.description}`;
-      })
-      .join('\n\n');
-
-    return `Search results for "${query}":\n\n${formatted}`;
-  } catch (error) {
-    return `Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
-  }
-}
 
 // Execute web fetch tool
 async function executeWebFetch(url: string): Promise<string> {
@@ -198,8 +155,6 @@ async function executeWebFetch(url: string): Promise<string> {
 // Execute a tool by name
 async function executeTool(name: string, input: Record<string, unknown>): Promise<string> {
   switch (name) {
-    case 'web_search':
-      return executeWebSearch(input.query as string);
     case 'web_fetch':
       return executeWebFetch(input.url as string);
     default:
@@ -451,9 +406,6 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
 
   // Check which tools are enabled
   const enabledToolNames: string[] = [];
-  if (settings.enabledToggles.includes('websearch')) {
-    enabledToolNames.push('web_search');
-  }
   if (settings.enabledToggles.includes('webfetch')) {
     enabledToolNames.push('web_fetch');
   }
