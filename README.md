@@ -3,13 +3,12 @@ A client for Claude AI with experimental new features!
 
 Lots of cool toggles and modes and stuff :D
 
-To run, either download a binary in the Releases, or for testing from source, run:
+To run, for testing from source, run:
 
 ```shell
 npm install
 npm start
 ```
-for dev testing.
 
 To build from source:
 
