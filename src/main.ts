@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, safeStorage, net } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import Anthropic from '@anthropic-ai/sdk';
-import { Duck } from 'goduckduckgo';
+import { search, SafeSearchType } from 'duck-duck-scrape';
 
 let mainWindow: BrowserWindow | null = null;
 let anthropicClient: Anthropic | null = null;
@@ -133,23 +133,19 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-// DuckDuckGo search instance
-const duckSearch = new Duck();
-
 // Execute web search tool
 async function executeWebSearch(query: string): Promise<string> {
   try {
-    const results = await duckSearch.search(query);
-    if (!results || results.length === 0) {
+    const results = await search(query, { safeSearch: SafeSearchType.MODERATE });
+    if (!results.results || results.results.length === 0) {
       return 'No search results found.';
     }
 
-    // Format results for Claude (use any since goduckduckgo types may vary)
-    const formatted = (results as Array<{ title?: string; url?: string; description?: string; snippet?: string }>)
+    // Format results for Claude
+    const formatted = results.results
       .slice(0, 8)
       .map((r, i: number) => {
-        const desc = r.description || r.snippet || '';
-        return `${i + 1}. ${r.title || 'Untitled'}\n   URL: ${r.url || ''}\n   ${desc}`;
+        return `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.description}`;
       })
       .join('\n\n');
 
