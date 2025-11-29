@@ -6,7 +6,13 @@
   "scripts": {
     "build": "tsc",
     "start": "npm run build && electron .",
-    "dev": "tsc && electron ."
+    "dev": "tsc && electron .",
+    "dist:mac": "npm run build && npx electron-builder --mac --universal",
+    "dist:mac:nodev": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --universal",
+    "dist:win": "npm run build && npx electron-builder --win portable",
+    "dist:linux": "npm run build && npx electron-builder --linux appimage",
+    "dist:all": "npm run build && npx electron-builder --mac --universal && npx electron-builder --win portable --x64 && npx electron-builder --linux appimage --x64",
+    "dist:all:nodev": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --universal && npx electron-builder --win portable --x64 && npx electron-builder --linux appimage --x64"
   },
   "keywords": [
     "electron",
@@ -19,10 +25,29 @@
   "devDependencies": {
     "@types/node": "^20.10.0",
     "electron": "^39.2.4",
+    "electron-builder": "^25.1.8",
     "typescript": "^5.3.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.0",
     "@phosphor-icons/web": "^2.0.3"
+  },
+  "build": {
+    "appId": "com.exgpt.app",
+    "productName": "ExGPT",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "category": "Utility"
+    }
   }
 }
