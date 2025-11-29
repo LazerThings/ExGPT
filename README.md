@@ -21,3 +21,5 @@ npm run dist:linux # Builds AppImage for Linux
 ```
 
 Uses Electron Builder.
+
+To update, you can instal the latest binary from the Releases and replace the old binary. Data is stored in Electron app data.
