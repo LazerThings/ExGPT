@@ -739,14 +739,10 @@ function createLiveHtmlLoading() {
   </div>`;
 }
 
-// Escape HTML for use in attributes
+// Escape HTML for use in srcdoc attribute (only escape quotes, not angle brackets)
 function escapeHtmlAttribute(text) {
   return text
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/"/g, '&quot;');
 }
 
 // Reload live frame

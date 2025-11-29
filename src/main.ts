@@ -50,12 +50,6 @@ interface Toggle {
 // Hardcoded toggles - these affect app behavior, not just prompts
 const TOGGLES: Toggle[] = [
   {
-    name: 'streaming',
-    displayName: 'Streaming',
-    icon: 'ph-lightning',
-    prompt: 'Responses are being streamed to the user in real-time.',
-  },
-  {
     name: 'markdown',
     displayName: 'Markdown Rendering',
     icon: 'ph-text-aa',
@@ -215,10 +209,13 @@ async function executeTool(name: string, input: Record<string, unknown>): Promis
 
 // Load modes from JSON
 function loadModes(): Mode[] {
-  const modesPath = path.join(__dirname, '..', 'modes.json');
+  // Use app.getAppPath() for packaged apps, __dirname for dev
+  const basePath = app.isPackaged ? app.getAppPath() : path.join(__dirname, '..');
+  const modesPath = path.join(basePath, 'modes.json');
   try {
     return JSON.parse(fs.readFileSync(modesPath, 'utf-8'));
-  } catch {
+  } catch (e) {
+    console.error('Failed to load modes.json:', e);
     return [];
   }
 }
@@ -254,7 +251,7 @@ function loadSettings(): Settings {
   } catch {
     console.error('Error loading settings');
   }
-  return { apiKey: '', selectedMode: 'quick-chat', enabledToggles: ['markdown'] };
+  return { apiKey: '', selectedMode: 'conversational', enabledToggles: ['markdown'] };
 }
 
 function saveSettings(settings: Settings): void {
@@ -449,8 +446,8 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
   // Add user message to chat
   chat.messages.push({ role: 'user', content: userMessage });
 
-  // Check if streaming is enabled
-  const isStreaming = settings.enabledToggles.includes('streaming');
+  // Streaming is always enabled
+  const isStreaming = true;
 
   // Check which tools are enabled
   const enabledToolNames: string[] = [];
@@ -710,7 +707,8 @@ ipcMain.handle('regenerate-message', async (_, chatId: string, messageIndex: num
     systemPrompt += togglePrompts.join('\n\n');
   }
 
-  const isStreaming = settings.enabledToggles.includes('streaming');
+  // Streaming is always enabled
+  const isStreaming = true;
   const maxTokens = selectedMode?.maxTokens || 8192;
   const model = selectedMode?.model || 'claude-sonnet-4-20250514';
 

@@ -510,7 +510,7 @@ body {
 }
 
 .message-content.markdown p {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .message-content.markdown p:last-child {
@@ -671,10 +671,10 @@ body {
 
 .live-html-frame {
   width: 100%;
-  min-height: 200px;
-  max-height: 500px;
+  min-height: 400px;
+  max-height: 800px;
   border: none;
-  background: var(--bg);
+  background: white;
 }
 
 /* Live HTML Loading State */
