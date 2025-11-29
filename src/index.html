@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data:;">
+  <title>ExGPT</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Jura:wght@300..700&family=Ubuntu+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
+  <!-- Phosphor Icons -->
+  <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/regular/style.css">
+  <!-- Highlight.js for syntax highlighting -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" id="hljs-theme">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body>
+  <!-- Left Sidebar - Chats -->
+  <aside id="left-sidebar" class="sidebar left-sidebar">
+    <div class="sidebar-header">
+      <h2>Chats</h2>
+      <button id="new-chat-btn" class="icon-btn" title="New Chat (⌘N)">
+        <i class="ph ph-plus"></i>
+      </button>
+    </div>
+    <div class="chat-search-container">
+      <div class="chat-search-input-wrapper">
+        <i class="ph ph-magnifying-glass"></i>
+        <input type="text" id="chat-search-input" placeholder="Search chats... (⌘Space)">
+      </div>
+    </div>
+    <div id="chat-list" class="chat-list"></div>
+    <div class="sidebar-footer">
+      <div class="sidebar-footer-row">
+        <button id="settings-btn" class="settings-btn">
+          <i class="ph ph-gear"></i>
+          <span>Settings</span>
+        </button>
+        <button id="dark-mode-btn" class="icon-btn" title="Toggle Dark Mode">
+          <i class="ph ph-moon"></i>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button id="close-settings" class="icon-btn">
+          <i class="ph ph-x"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="api-key-input">Anthropic API Key</label>
+          <div class="input-with-btn">
+            <input type="password" id="api-key-input" placeholder="sk-ant-...">
+            <button id="save-api-key" class="btn btn-primary">Save</button>
+          </div>
+          <p class="hint">Your API key is stored securely and encrypted locally. Use $ENV_VAR to reference an environment variable (e.g. $ANTHROPIC_API_KEY).</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <main id="main-content" class="main-content">
+    <!-- Top Bar -->
+    <header class="top-bar">
+      <button id="toggle-left-sidebar" class="icon-btn" title="Toggle Sidebar">
+        <i class="ph ph-sidebar-simple"></i>
+      </button>
+      <h1 id="current-chat-title">ExGPT</h1>
+      <div class="spacer"></div>
+    </header>
+
+    <!-- Messages Area -->
+    <div id="messages-container" class="messages-container">
+      <div id="welcome-screen" class="welcome-screen">
+        <div class="welcome-content">
+          <h1>ExGPT</h1>
+          <p>Start a new chat or select an existing one</p>
+        </div>
+      </div>
+      <div id="messages" class="messages"></div>
+    </div>
+
+    <!-- Input Area -->
+    <div class="input-area">
+      <div class="input-container">
+        <textarea id="message-input" placeholder="Type your message..." rows="1"></textarea>
+        <div class="input-actions">
+          <button id="toggle-right-sidebar" class="icon-btn" title="Configuration">
+            <i class="ph ph-sliders-horizontal"></i>
+          </button>
+          <button id="send-btn" class="icon-btn send-btn" title="Send (⌘Enter)">
+            <i class="ph ph-paper-plane-tilt"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Right Sidebar - Configuration -->
+  <aside id="right-sidebar" class="sidebar right-sidebar">
+    <div class="sidebar-header">
+      <h2>Configuration</h2>
+      <button id="close-right-sidebar" class="icon-btn">
+        <i class="ph ph-x"></i>
+      </button>
+    </div>
+    <div class="sidebar-content">
+      <!-- Modes Collapsible -->
+      <div class="collapsible">
+        <button class="collapsible-header">
+          <span>Modes</span>
+          <i class="ph ph-caret-down"></i>
+        </button>
+        <div class="collapsible-content">
+          <div id="modes-list" class="radio-card-list"></div>
+        </div>
+      </div>
+
+      <!-- Toggles Collapsible -->
+      <div class="collapsible">
+        <button class="collapsible-header">
+          <span>Toggles</span>
+          <i class="ph ph-caret-down"></i>
+        </button>
+        <div class="collapsible-content">
+          <div id="toggles-list" class="toggles-list"></div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Overlay for sidebars on mobile -->
+  <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

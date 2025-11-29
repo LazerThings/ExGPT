@@ -1,0 +1,53 @@
+[
+  {
+    "name": "quick-chat",
+    "display-name": "Quick Chat",
+    "icon": "ph-chat-circle",
+    "description": "Fast, concise responses for quick questions.\nUses Claude Haiku for speed.",
+    "prompt": "Be concise and direct. Provide brief, helpful answers without unnecessary elaboration.",
+    "model": "claude-3-5-haiku-20241022",
+    "maxTokens": 4096,
+    "extendedThinking": false
+  },
+  {
+    "name": "balanced",
+    "display-name": "Balanced",
+    "icon": "ph-scales",
+    "description": "A balance of speed and depth.\nGood for most conversations.",
+    "prompt": "Provide helpful, well-structured responses. Be thorough but avoid unnecessary verbosity.",
+    "model": "claude-sonnet-4-20250514",
+    "maxTokens": 8192,
+    "extendedThinking": false
+  },
+  {
+    "name": "deep-thinking",
+    "display-name": "Deep Thinking",
+    "icon": "ph-brain",
+    "description": "Extended reasoning for complex problems.\nTakes longer but thinks more deeply.",
+    "prompt": "Take your time to think through problems carefully. Provide comprehensive, well-reasoned responses.",
+    "model": "claude-sonnet-4-20250514",
+    "maxTokens": 16384,
+    "extendedThinking": true,
+    "thinkingBudget": 10000
+  },
+  {
+    "name": "code-assistant",
+    "display-name": "Code Assistant",
+    "icon": "ph-code",
+    "description": "Optimized for programming help.\nProvides clean, well-documented code.",
+    "prompt": "You are a skilled programming assistant. Provide clean, well-documented code with explanations. Follow best practices and consider edge cases. Use markdown code blocks with language hints.",
+    "model": "claude-sonnet-4-20250514",
+    "maxTokens": 8192,
+    "extendedThinking": false
+  },
+  {
+    "name": "creative-writer",
+    "display-name": "Creative Writer",
+    "icon": "ph-pencil-line",
+    "description": "For creative writing and storytelling.\nEngaging, imaginative responses.",
+    "prompt": "Be creative, expressive, and engaging. Use vivid language and interesting narrative techniques. Feel free to be playful with language while maintaining quality.",
+    "model": "claude-sonnet-4-20250514",
+    "maxTokens": 8192,
+    "extendedThinking": false
+  }
+]
