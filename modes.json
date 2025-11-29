@@ -56,7 +56,7 @@
     "name": "research",
     "display-name": "Research",
     "icon": "ph-magnifying-glass",
-    "description": "Analytical, well-sourced responses.\nUses Claude Opus 4.5. Great with Web Search toggle.",
+    "description": "Analytical, well-sourced responses.\nUses Claude Opus 4.5 with extended thinking. Great with Web Search toggle.",
     "prompt": "Provide well-researched, analytical responses. Present information objectively with multiple perspectives when applicable. Structure findings clearly. Acknowledge uncertainty where it exists. Prioritize accuracy and thoroughness.",
     "model": "claude-opus-4-5-20251101",
     "maxTokens": 32000,
