@@ -144,10 +144,14 @@ async function executeWebSearch(query: string): Promise<string> {
       return 'No search results found.';
     }
 
-    // Format results for Claude
-    const formatted = results.slice(0, 8).map((r: { title: string; url: string; description: string }, i: number) =>
-      `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.description}`
-    ).join('\n\n');
+    // Format results for Claude (use any since goduckduckgo types may vary)
+    const formatted = (results as Array<{ title?: string; url?: string; description?: string; snippet?: string }>)
+      .slice(0, 8)
+      .map((r, i: number) => {
+        const desc = r.description || r.snippet || '';
+        return `${i + 1}. ${r.title || 'Untitled'}\n   URL: ${r.url || ''}\n   ${desc}`;
+      })
+      .join('\n\n');
 
     return `Search results for "${query}":\n\n${formatted}`;
   } catch (error) {
