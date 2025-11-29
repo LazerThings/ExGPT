@@ -361,12 +361,10 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
         mainWindow?.webContents.send('stream-chunk', { chatId, text, fullMessage: assistantMessage });
       });
 
-      // Handle thinking blocks for extended thinking
-      stream.on('contentBlock', (block) => {
-        if (block.type === 'thinking') {
-          thinkingContent = block.thinking;
-          mainWindow?.webContents.send('thinking-block', { chatId, thinking: thinkingContent });
-        }
+      // Handle streaming thinking deltas for extended thinking
+      stream.on('thinking', (_thinkingDelta, thinkingSnapshot) => {
+        thinkingContent = thinkingSnapshot;
+        mainWindow?.webContents.send('thinking-block', { chatId, thinking: thinkingContent });
       });
 
       await stream.finalMessage();
