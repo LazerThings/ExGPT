@@ -48,6 +48,20 @@ async function init() {
   renderChatList();
   renderModes();
   renderToggles();
+  await updateApiKeyHint();
+}
+
+// Update API key hint based on whether app is packaged
+async function updateApiKeyHint() {
+  const hint = document.getElementById('api-key-hint');
+  if (!hint) return;
+
+  const isPackaged = await window.api.isPackaged();
+  if (isPackaged) {
+    hint.textContent = 'Your API key is stored securely in your system keychain.';
+  } else {
+    hint.textContent = 'Your API key is stored securely and encrypted locally. Use $ENV_VAR to reference an environment variable (e.g. $ANTHROPIC_API_KEY).';
+  }
 }
 
 // Load data from main process

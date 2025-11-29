@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   // Modes and toggles
   getModes: () => ipcRenderer.invoke('get-modes'),
   getToggles: () => ipcRenderer.invoke('get-toggles'),
+  isPackaged: () => ipcRenderer.invoke('is-packaged'),
 
   // Messages
   sendMessage: (chatId: string, message: string) => ipcRenderer.invoke('send-message', chatId, message),

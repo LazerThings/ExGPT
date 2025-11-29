@@ -416,6 +416,7 @@ ipcMain.handle('get-actual-settings', () => loadSettings());
 // Modes and toggles
 ipcMain.handle('get-modes', () => loadModes());
 ipcMain.handle('get-toggles', () => TOGGLES);
+ipcMain.handle('is-packaged', () => app.isPackaged);
 
 // Send message to Claude
 ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) => {
