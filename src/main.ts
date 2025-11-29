@@ -1,7 +1,8 @@
-import { app, BrowserWindow, ipcMain, safeStorage } from 'electron';
+import { app, BrowserWindow, ipcMain, safeStorage, net } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import Anthropic from '@anthropic-ai/sdk';
+import { Duck } from 'goduckduckgo';
 
 let mainWindow: BrowserWindow | null = null;
 let anthropicClient: Anthropic | null = null;
@@ -86,7 +87,131 @@ const TOGGLES: Toggle[] = [
     icon: 'ph-moon',
     prompt: '',
   },
+  {
+    name: 'websearch',
+    displayName: 'Web Search',
+    icon: 'ph-magnifying-glass',
+    prompt: 'You have access to a web_search tool that lets you search the internet using DuckDuckGo. Use it when you need current information, facts you\'re unsure about, or when the user asks about recent events.',
+  },
+  {
+    name: 'webfetch',
+    displayName: 'Web Fetch',
+    icon: 'ph-globe-simple',
+    prompt: 'You have access to a web_fetch tool that lets you fetch and read the content of web pages. Use it when you need to read a specific URL the user provides or when you need more details from a search result.',
+  },
 ];
+
+// Tool definitions for Claude
+const TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'web_search',
+    description: 'Search the web using DuckDuckGo. Returns search results with titles, URLs, and snippets. Use this to find current information, facts, or recent events.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'The search query',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'web_fetch',
+    description: 'Fetch and read the content of a web page. Returns the text content of the page. Use this to read specific URLs or get more details from search results.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        url: {
+          type: 'string',
+          description: 'The URL to fetch',
+        },
+      },
+      required: ['url'],
+    },
+  },
+];
+
+// DuckDuckGo search instance
+const duckSearch = new Duck();
+
+// Execute web search tool
+async function executeWebSearch(query: string): Promise<string> {
+  try {
+    const results = await duckSearch.search(query);
+    if (!results || results.length === 0) {
+      return 'No search results found.';
+    }
+
+    // Format results for Claude
+    const formatted = results.slice(0, 8).map((r: { title: string; url: string; description: string }, i: number) =>
+      `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.description}`
+    ).join('\n\n');
+
+    return `Search results for "${query}":\n\n${formatted}`;
+  } catch (error) {
+    return `Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
+  }
+}
+
+// Execute web fetch tool
+async function executeWebFetch(url: string): Promise<string> {
+  return new Promise((resolve) => {
+    try {
+      const request = net.request(url);
+      let data = '';
+
+      request.on('response', (response) => {
+        response.on('data', (chunk) => {
+          data += chunk.toString();
+        });
+
+        response.on('end', () => {
+          // Strip HTML tags and clean up for readability
+          let text = data
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .trim();
+
+          // Limit response size
+          if (text.length > 15000) {
+            text = text.substring(0, 15000) + '\n\n[Content truncated...]';
+          }
+
+          resolve(`Content from ${url}:\n\n${text}`);
+        });
+      });
+
+      request.on('error', (error) => {
+        resolve(`Failed to fetch ${url}: ${error.message}`);
+      });
+
+      request.end();
+    } catch (error) {
+      resolve(`Failed to fetch ${url}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  });
+}
+
+// Execute a tool by name
+async function executeTool(name: string, input: Record<string, unknown>): Promise<string> {
+  switch (name) {
+    case 'web_search':
+      return executeWebSearch(input.query as string);
+    case 'web_fetch':
+      return executeWebFetch(input.url as string);
+    default:
+      return `Unknown tool: ${name}`;
+  }
+}
 
 // Load modes from JSON
 function loadModes(): Mode[] {
@@ -326,48 +451,110 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
   // Check if streaming is enabled
   const isStreaming = settings.enabledToggles.includes('streaming');
 
+  // Check which tools are enabled
+  const enabledToolNames: string[] = [];
+  if (settings.enabledToggles.includes('websearch')) {
+    enabledToolNames.push('web_search');
+  }
+  if (settings.enabledToggles.includes('webfetch')) {
+    enabledToolNames.push('web_fetch');
+  }
+  const enabledTools = TOOLS.filter(t => enabledToolNames.includes(t.name));
+  const hasTools = enabledTools.length > 0;
+
   // Build request parameters
   const maxTokens = selectedMode?.maxTokens || 8192;
   const model = selectedMode?.model || 'claude-sonnet-4-20250514';
 
   try {
+    // Build messages for the API
+    let apiMessages: Anthropic.MessageParam[] = chat.messages.map(m => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    let assistantMessage = '';
+    let thinkingContent = '';
+
     if (isStreaming) {
-      // Streaming response
-      const streamParams: Anthropic.MessageStreamParams = {
-        model,
-        max_tokens: maxTokens,
-        system: systemPrompt,
-        messages: chat.messages.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
+      // Streaming response with optional tools
+      const runStreamWithTools = async (): Promise<void> => {
+        const streamParams: Anthropic.MessageStreamParams = {
+          model,
+          max_tokens: maxTokens,
+          system: systemPrompt,
+          messages: apiMessages,
+        };
+
+        // Add tools if enabled
+        if (hasTools) {
+          streamParams.tools = enabledTools;
+        }
+
+        // Add extended thinking if enabled (but not with tools)
+        if (!hasTools && selectedMode?.extendedThinking && selectedMode?.thinkingBudget) {
+          streamParams.thinking = {
+            type: 'enabled',
+            budget_tokens: selectedMode.thinkingBudget,
+          };
+        }
+
+        const stream = anthropicClient!.messages.stream(streamParams);
+
+        // Collect tool uses during streaming
+        const pendingToolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
+
+        stream.on('text', (text) => {
+          assistantMessage += text;
+          mainWindow?.webContents.send('stream-chunk', { chatId, text, fullMessage: assistantMessage });
+        });
+
+        // Handle streaming thinking deltas
+        stream.on('thinking', (_thinkingDelta, thinkingSnapshot) => {
+          thinkingContent = thinkingSnapshot;
+          mainWindow?.webContents.send('thinking-block', { chatId, thinking: thinkingContent });
+        });
+
+        // Collect tool use blocks as they complete
+        stream.on('contentBlock', (block) => {
+          if (block.type === 'tool_use') {
+            pendingToolUses.push({
+              id: block.id,
+              name: block.name,
+              input: block.input as Record<string, unknown>,
+            });
+            // Notify UI about tool use
+            mainWindow?.webContents.send('tool-use', { chatId, tools: [{ name: block.name, input: block.input }] });
+          }
+        });
+
+        const finalMessage = await stream.finalMessage();
+
+        // If there are tool uses, process them and continue
+        if (finalMessage.stop_reason === 'tool_use' && pendingToolUses.length > 0) {
+          // Add assistant's response to messages
+          apiMessages.push({ role: 'assistant', content: finalMessage.content });
+
+          // Process each tool call
+          const toolResults: Anthropic.ToolResultBlockParam[] = [];
+          for (const toolUse of pendingToolUses) {
+            const result = await executeTool(toolUse.name, toolUse.input);
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: result,
+            });
+          }
+
+          // Add tool results
+          apiMessages.push({ role: 'user', content: toolResults });
+
+          // Continue the conversation (recursive call for more tool use)
+          await runStreamWithTools();
+        }
       };
 
-      // Add extended thinking if enabled
-      if (selectedMode?.extendedThinking && selectedMode?.thinkingBudget) {
-        streamParams.thinking = {
-          type: 'enabled',
-          budget_tokens: selectedMode.thinkingBudget,
-        };
-      }
-
-      const stream = anthropicClient.messages.stream(streamParams);
-
-      let assistantMessage = '';
-      let thinkingContent = '';
-
-      stream.on('text', (text) => {
-        assistantMessage += text;
-        mainWindow?.webContents.send('stream-chunk', { chatId, text, fullMessage: assistantMessage });
-      });
-
-      // Handle streaming thinking deltas for extended thinking
-      stream.on('thinking', (_thinkingDelta, thinkingSnapshot) => {
-        thinkingContent = thinkingSnapshot;
-        mainWindow?.webContents.send('thinking-block', { chatId, thinking: thinkingContent });
-      });
-
-      await stream.finalMessage();
+      await runStreamWithTools();
 
       chat.messages.push({ role: 'assistant', content: assistantMessage });
       chat.updatedAt = Date.now();
@@ -375,36 +562,71 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
 
       mainWindow?.webContents.send('stream-end', { chatId });
       return { message: assistantMessage, thinking: thinkingContent, chat, streamed: true };
+
     } else {
-      // Non-streaming response
-      const createParams: Anthropic.MessageCreateParams = {
-        model,
-        max_tokens: maxTokens,
-        system: systemPrompt,
-        messages: chat.messages.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
+      // Non-streaming response with optional tools
+      const runWithTools = async (): Promise<Anthropic.Message> => {
+        const createParams: Anthropic.MessageCreateParams = {
+          model,
+          max_tokens: maxTokens,
+          system: systemPrompt,
+          messages: apiMessages,
+        };
+
+        // Add tools if enabled
+        if (hasTools) {
+          createParams.tools = enabledTools;
+        }
+
+        // Add extended thinking if enabled (but not with tools)
+        if (!hasTools && selectedMode?.extendedThinking && selectedMode?.thinkingBudget) {
+          createParams.thinking = {
+            type: 'enabled',
+            budget_tokens: selectedMode.thinkingBudget,
+          };
+        }
+
+        const response = await anthropicClient!.messages.create(createParams);
+
+        // If there are tool uses, process them and continue
+        if (response.stop_reason === 'tool_use') {
+          // Notify UI about tool use
+          const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
+          mainWindow?.webContents.send('tool-use', { chatId, tools: toolUseBlocks });
+
+          // Add assistant's response to messages
+          apiMessages.push({ role: 'assistant', content: response.content });
+
+          // Process each tool call
+          const toolResults: Anthropic.ToolResultBlockParam[] = [];
+          for (const block of response.content) {
+            if (block.type === 'tool_use') {
+              const result = await executeTool(block.name, block.input as Record<string, unknown>);
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: block.id,
+                content: result,
+              });
+            }
+          }
+
+          // Add tool results
+          apiMessages.push({ role: 'user', content: toolResults });
+
+          // Continue the conversation (recursive call for more tool use)
+          return runWithTools();
+        }
+
+        return response;
       };
 
-      // Add extended thinking if enabled
-      if (selectedMode?.extendedThinking && selectedMode?.thinkingBudget) {
-        createParams.thinking = {
-          type: 'enabled',
-          budget_tokens: selectedMode.thinkingBudget,
-        };
-      }
-
-      const response = await anthropicClient.messages.create(createParams);
-
-      let assistantMessage = '';
-      let thinkingContent = '';
+      const response = await runWithTools();
 
       for (const block of response.content) {
         if (block.type === 'text') {
           assistantMessage += block.text;
         } else if (block.type === 'thinking') {
-          thinkingContent = block.thinking;
+          thinkingContent = (block as Anthropic.ThinkingBlock).thinking;
         }
       }
 

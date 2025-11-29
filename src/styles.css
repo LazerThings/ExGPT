@@ -453,6 +453,48 @@ body {
   font-size: 12px;
 }
 
+/* Tool Use Block */
+.tool-use-block {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.tool-use-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.tool-use-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-use-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+}
+
+.tool-use-item i {
+  color: var(--primary);
+}
+
 /* Markdown Styles in Messages */
 .message-content.markdown h1,
 .message-content.markdown h2,

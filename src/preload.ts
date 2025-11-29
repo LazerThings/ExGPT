@@ -39,9 +39,13 @@ contextBridge.exposeInMainWorld('api', {
   onThinkingBlock: (callback: (data: { chatId: string; thinking: string }) => void) => {
     ipcRenderer.on('thinking-block', (_, data) => callback(data));
   },
+  onToolUse: (callback: (data: { chatId: string; tools: Array<{ name: string; input: unknown }> }) => void) => {
+    ipcRenderer.on('tool-use', (_, data) => callback(data));
+  },
   removeStreamListeners: () => {
     ipcRenderer.removeAllListeners('stream-chunk');
     ipcRenderer.removeAllListeners('stream-end');
     ipcRenderer.removeAllListeners('thinking-block');
+    ipcRenderer.removeAllListeners('tool-use');
   },
 });

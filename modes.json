@@ -1,53 +1,66 @@
 [
   {
-    "name": "quick-chat",
-    "display-name": "Quick Chat",
-    "icon": "ph-chat-circle",
-    "description": "Fast, concise responses for quick questions.\nUses Claude Haiku for speed.",
-    "prompt": "Be concise and direct. Provide brief, helpful answers without unnecessary elaboration.",
-    "model": "claude-3-5-haiku-20241022",
-    "maxTokens": 4096,
-    "extendedThinking": false
-  },
-  {
-    "name": "balanced",
-    "display-name": "Balanced",
-    "icon": "ph-scales",
-    "description": "A balance of speed and depth.\nGood for most conversations.",
-    "prompt": "Provide helpful, well-structured responses. Be thorough but avoid unnecessary verbosity.",
-    "model": "claude-sonnet-4-20250514",
-    "maxTokens": 8192,
-    "extendedThinking": false
-  },
-  {
-    "name": "deep-thinking",
-    "display-name": "Deep Thinking",
+    "name": "clear",
+    "display-name": "Clear",
     "icon": "ph-brain",
-    "description": "Extended reasoning for complex problems.\nTakes longer but thinks more deeply.",
-    "prompt": "Take your time to think through problems carefully. Provide comprehensive, well-reasoned responses.",
-    "model": "claude-sonnet-4-20250514",
-    "maxTokens": 16384,
+    "description": "Friendly and thoughtful responses.\nUses Claude Sonnet 4.5.",
+    "prompt": "Be helpful and friendly in all interactions. Take your time to think through problems carefully before answering. Communicate clearly and directly without unnecessary complexity. Aim to be both thorough and easy to understand.",
+    "model": "claude-sonnet-4-5-20250929",
+    "maxTokens": 32000,
+    "extendedThinking": false
+  },
+  {
+    "name": "conversational",
+    "display-name": "Conversational",
+    "icon": "ph-chats-teardrop",
+    "description": "Natural dialogue that builds on context.\nUses Claude Haiku 4.5.",
+    "prompt": "Engage naturally like an ongoing dialogue. Reference previous points in the conversation. Build on what's been discussed. Use a flowing, talk-like style rather than formal responses.",
+    "model": "claude-haiku-4-5-20251001",
+    "maxTokens": 12000,
+    "extendedThinking": false
+  },
+  {
+    "name": "comprehensive",
+    "display-name": "Comprehensive",
+    "icon": "ph-article",
+    "description": "Deep, thorough responses with extended thinking.\nUses Claude Haiku 4.5.",
+    "prompt": "Provide comprehensive, thorough responses. Include context, examples, and nuance. Anticipate follow-up questions. Break down complex topics into clear sections. Prioritize completeness and depth.",
+    "model": "claude-haiku-4-5-20251001",
+    "maxTokens": 32000,
     "extendedThinking": true,
     "thinkingBudget": 10000
   },
   {
-    "name": "code-assistant",
-    "display-name": "Code Assistant",
-    "icon": "ph-code",
-    "description": "Optimized for programming help.\nProvides clean, well-documented code.",
-    "prompt": "You are a skilled programming assistant. Provide clean, well-documented code with explanations. Follow best practices and consider edge cases. Use markdown code blocks with language hints.",
-    "model": "claude-sonnet-4-20250514",
-    "maxTokens": 8192,
-    "extendedThinking": false
+    "name": "exploratory",
+    "display-name": "Exploratory",
+    "icon": "ph-lightbulb",
+    "description": "Think through topics from multiple angles.\nUses Claude Sonnet 4.5 with extended thinking.",
+    "prompt": "Help think through topics without rushing to conclusions. Raise interesting questions. Consider multiple angles. Encourage deeper investigation. Think out loud about possibilities and implications.",
+    "model": "claude-sonnet-4-5-20250929",
+    "maxTokens": 32000,
+    "extendedThinking": true,
+    "thinkingBudget": 10000
   },
   {
-    "name": "creative-writer",
-    "display-name": "Creative Writer",
-    "icon": "ph-pencil-line",
-    "description": "For creative writing and storytelling.\nEngaging, imaginative responses.",
-    "prompt": "Be creative, expressive, and engaging. Use vivid language and interesting narrative techniques. Feel free to be playful with language while maintaining quality.",
-    "model": "claude-sonnet-4-20250514",
-    "maxTokens": 8192,
-    "extendedThinking": false
+    "name": "coding",
+    "display-name": "Coding",
+    "icon": "ph-code",
+    "description": "Expert programming assistance with deep reasoning.\nUses Claude Opus 4.5 with extended thinking.",
+    "prompt": "Focus on writing clean, functional code. Include comments explaining key logic. Follow best practices. Provide brief explanations of your approach. Consider edge cases and suggest improvements when relevant.",
+    "model": "claude-opus-4-5-20251101",
+    "maxTokens": 64000,
+    "extendedThinking": true,
+    "thinkingBudget": 12000
+  },
+  {
+    "name": "research",
+    "display-name": "Research",
+    "icon": "ph-magnifying-glass",
+    "description": "Analytical, well-sourced responses.\nUses Claude Opus 4.5. Great with Web Search toggle.",
+    "prompt": "Provide well-researched, analytical responses. Present information objectively with multiple perspectives when applicable. Structure findings clearly. Acknowledge uncertainty where it exists. Prioritize accuracy and thoroughness.",
+    "model": "claude-opus-4-5-20251101",
+    "maxTokens": 32000,
+    "extendedThinking": true,
+    "thinkingBudget": 10000
   }
 ]

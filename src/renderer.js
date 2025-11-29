@@ -174,6 +174,12 @@ function setupStreamListeners() {
       showThinkingBlock(thinking);
     }
   });
+
+  window.api.onToolUse(({ chatId, tools }) => {
+    if (chatId === currentChatId) {
+      showToolUse(tools);
+    }
+  });
 }
 
 // Setup keyboard shortcuts
@@ -1083,6 +1089,35 @@ function showThinkingBlock(thinking) {
       streamingEl.insertBefore(thinkingEl, streamingEl.firstChild);
     }
     thinkingEl.querySelector('.thinking-block-content').textContent = thinking;
+    scrollToBottom();
+  }
+}
+
+// Show tool use indicator
+function showToolUse(tools) {
+  const streamingEl = document.getElementById('streaming-message');
+  if (streamingEl) {
+    let toolEl = streamingEl.querySelector('.tool-use-block');
+    if (!toolEl) {
+      toolEl = document.createElement('div');
+      toolEl.className = 'tool-use-block';
+      streamingEl.insertBefore(toolEl, streamingEl.firstChild);
+    }
+
+    const toolNames = tools.map(t => {
+      const icon = t.name === 'web_search' ? 'ph-magnifying-glass' : 'ph-globe-simple';
+      const displayName = t.name === 'web_search' ? 'Searching' : 'Fetching';
+      const query = t.name === 'web_search' ? t.input.query : t.input.url;
+      return `<div class="tool-use-item"><i class="ph ${icon}"></i> ${displayName}: ${query}</div>`;
+    }).join('');
+
+    toolEl.innerHTML = `
+      <div class="tool-use-header">
+        <i class="ph ph-wrench"></i>
+        <span>Using tools...</span>
+      </div>
+      <div class="tool-use-content">${toolNames}</div>
+    `;
     scrollToBottom();
   }
 }
