@@ -24,6 +24,7 @@ interface Settings {
   apiKey: string;
   selectedMode: string;
   enabledToggles: string[];
+  debugFeatures?: boolean;
 }
 
 interface Mode {
@@ -52,7 +53,7 @@ const TOGGLES: Toggle[] = [
     name: 'markdown',
     displayName: 'Markdown Rendering',
     icon: 'ph-text-aa',
-    prompt: 'Your responses will be rendered as GitHub Flavored Markdown (GFM). Use formatting like **bold**, *italic*, ~~strikethrough~~, `inline code`, fenced code blocks with language hints, tables, task lists, and other GFM features.',
+    prompt: 'Your responses will be rendered as GitHub Flavored Markdown (GFM). Use formatting like **bold**, *italic*, ~~strikethrough~~, `inline code`, fenced code blocks with language hints, tables, task lists, and other GFM features. Note: HTML is not supported, only pure GFM syntax.',
   },
   {
     name: 'timestamps',
@@ -85,6 +86,13 @@ const TOGGLES: Toggle[] = [
     displayName: 'Web Fetch',
     icon: 'ph-globe-simple',
     prompt: 'You have access to a web_fetch tool that lets you fetch and read the content of web pages. Use it when you need to read a specific URL the user provides or when you need more details from a search result.',
+  },
+  {
+    name: 'debuginfo',
+    displayName: 'Debug Info',
+    icon: 'ph-bug',
+    prompt: '', // Built dynamically
+    dependsOn: 'debugfeatures', // Special dependency - checked against settings.debugFeatures
   },
 ];
 
@@ -152,6 +160,44 @@ async function executeWebFetch(url: string): Promise<string> {
   });
 }
 
+// Build debug info prompt showing configured vs actual settings
+function buildDebugInfo(settings: Settings, selectedMode: Mode | undefined, enabledToggles: Toggle[]): string {
+  const modeConfig = selectedMode ? {
+    name: selectedMode.name,
+    displayName: selectedMode['display-name'],
+    model: selectedMode.model,
+    maxTokens: selectedMode.maxTokens,
+    extendedThinking: selectedMode.extendedThinking,
+    thinkingBudget: selectedMode.thinkingBudget,
+  } : null;
+
+  // Check if extended thinking will actually be used
+  const hasToolsEnabled = settings.enabledToggles.includes('webfetch');
+  const willUseThinking = selectedMode?.extendedThinking && selectedMode?.thinkingBudget;
+  const usesInterleavedThinking = hasToolsEnabled && willUseThinking;
+
+  const actualSettings = {
+    model: selectedMode?.model || 'claude-sonnet-4-20250514',
+    maxTokens: selectedMode?.maxTokens || 8192,
+    extendedThinkingActive: willUseThinking,
+    interleavedThinking: usesInterleavedThinking,
+  };
+
+  return `[DEBUG INFO - Configuration vs Runtime]
+Mode Configuration (from modes.json):
+${JSON.stringify(modeConfig, null, 2)}
+
+Enabled Toggles: ${settings.enabledToggles.join(', ') || 'none'}
+
+Actual Runtime Settings:
+- Model being used: ${actualSettings.model}
+- Max tokens: ${actualSettings.maxTokens}
+- Extended thinking active: ${actualSettings.extendedThinkingActive}
+${actualSettings.interleavedThinking ? '- Interleaved thinking: enabled (tools + thinking via beta API)' : ''}
+
+If there's a mismatch between the mode configuration and actual runtime settings, this indicates a potential bug in the code.`;
+}
+
 // Execute a tool by name
 async function executeTool(name: string, input: Record<string, unknown>): Promise<string> {
   switch (name) {
@@ -206,7 +252,7 @@ function loadSettings(): Settings {
   } catch {
     console.error('Error loading settings');
   }
-  return { apiKey: '', selectedMode: 'conversational', enabledToggles: ['markdown'] };
+  return { apiKey: '', selectedMode: 'conversational', enabledToggles: ['markdown'], debugFeatures: false };
 }
 
 function saveSettings(settings: Settings): void {
@@ -365,6 +411,17 @@ ipcMain.handle('save-toggles', (_, toggles: string[]) => {
 
 ipcMain.handle('get-actual-settings', () => loadSettings());
 
+ipcMain.handle('save-debug-features', (_, enabled: boolean) => {
+  const settings = loadSettings();
+  settings.debugFeatures = enabled;
+  // If disabling debug features, also disable the debuginfo toggle
+  if (!enabled) {
+    settings.enabledToggles = settings.enabledToggles.filter(t => t !== 'debuginfo');
+  }
+  saveSettings(settings);
+  return true;
+});
+
 // Modes and toggles
 ipcMain.handle('get-modes', () => loadModes());
 ipcMain.handle('get-toggles', () => TOGGLES);
@@ -393,9 +450,18 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
   if (selectedMode?.prompt) {
     systemPrompt += selectedMode.prompt + '\n\n';
   }
-  const togglePrompts = enabledToggles.map(t => t.prompt).filter(p => p);
+  const togglePrompts = enabledToggles
+    .filter(t => t.name !== 'debuginfo') // Handle debuginfo separately
+    .map(t => t.prompt)
+    .filter(p => p);
   if (togglePrompts.length > 0) {
     systemPrompt += togglePrompts.join('\n\n');
+  }
+
+  // Add debug info if enabled
+  if (settings.enabledToggles.includes('debuginfo') && settings.debugFeatures) {
+    const debugInfo = buildDebugInfo(settings, selectedMode, enabledToggles);
+    systemPrompt += '\n\n' + debugInfo;
   }
 
   // Add user message to chat
@@ -424,7 +490,8 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
     }));
 
     let assistantMessage = '';
-    let thinkingContent = '';
+    let thinkingBlockIndex = 0;
+    let currentThinkingContent = '';
 
     if (isStreaming) {
       // Streaming response with optional tools
@@ -441,15 +508,19 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
           streamParams.tools = enabledTools;
         }
 
-        // Add extended thinking if enabled (but not with tools)
-        if (!hasTools && selectedMode?.extendedThinking && selectedMode?.thinkingBudget) {
+        // Add extended thinking if enabled
+        if (selectedMode?.extendedThinking && selectedMode?.thinkingBudget) {
           streamParams.thinking = {
             type: 'enabled',
             budget_tokens: selectedMode.thinkingBudget,
           };
         }
 
-        const stream = anthropicClient!.messages.stream(streamParams);
+        // Use beta API if we have both tools and thinking (interleaved thinking)
+        const needsInterleavedThinking = hasTools && selectedMode?.extendedThinking && selectedMode?.thinkingBudget;
+        const stream = needsInterleavedThinking
+          ? anthropicClient!.beta.messages.stream({ ...streamParams, betas: ['interleaved-thinking-2025-05-14'] })
+          : anthropicClient!.messages.stream(streamParams);
 
         // Collect tool uses during streaming
         const pendingToolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
@@ -459,13 +530,17 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
           mainWindow?.webContents.send('stream-chunk', { chatId, text, fullMessage: assistantMessage });
         });
 
-        // Handle streaming thinking deltas
+        // Handle streaming thinking deltas - supports multiple thinking blocks (interleaved thinking)
         stream.on('thinking', (_thinkingDelta, thinkingSnapshot) => {
-          thinkingContent = thinkingSnapshot;
-          mainWindow?.webContents.send('thinking-block', { chatId, thinking: thinkingContent });
+          currentThinkingContent = thinkingSnapshot;
+          mainWindow?.webContents.send('thinking-block', {
+            chatId,
+            thinking: currentThinkingContent,
+            blockIndex: thinkingBlockIndex
+          });
         });
 
-        // Collect tool use blocks as they complete
+        // Collect tool use and thinking blocks as they complete
         stream.on('contentBlock', (block) => {
           if (block.type === 'tool_use') {
             pendingToolUses.push({
@@ -475,6 +550,10 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
             });
             // Notify UI about tool use
             mainWindow?.webContents.send('tool-use', { chatId, tools: [{ name: block.name, input: block.input }] });
+          } else if (block.type === 'thinking') {
+            // Thinking block completed - increment index for next thinking block
+            thinkingBlockIndex++;
+            currentThinkingContent = '';
           }
         });
 
@@ -483,7 +562,20 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
         // If there are tool uses, process them and continue
         if (finalMessage.stop_reason === 'tool_use' && pendingToolUses.length > 0) {
           // Add assistant's response to messages
-          apiMessages.push({ role: 'assistant', content: finalMessage.content });
+          // Clean up content blocks to remove extra fields from beta API (like 'parsed')
+          // but preserve required fields like 'signature' for thinking blocks
+          const cleanContent = finalMessage.content.map(block => {
+            if (block.type === 'text') {
+              return { type: 'text' as const, text: block.text };
+            } else if (block.type === 'tool_use') {
+              return { type: 'tool_use' as const, id: block.id, name: block.name, input: block.input };
+            } else if (block.type === 'thinking') {
+              // Must include signature for thinking blocks
+              return { type: 'thinking' as const, thinking: block.thinking, signature: (block as { signature?: string }).signature };
+            }
+            return block;
+          });
+          apiMessages.push({ role: 'assistant', content: cleanContent as Anthropic.ContentBlockParam[] });
 
           // Process each tool call
           const toolResults: Anthropic.ToolResultBlockParam[] = [];
@@ -508,10 +600,19 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
 
       chat.messages.push({ role: 'assistant', content: assistantMessage });
       chat.updatedAt = Date.now();
-      saveChats(chats);
+      // Reload chats to preserve any title updates made by generate-title
+      const freshChats = loadChats();
+      const freshChat = freshChats.find(c => c.id === chatId);
+      if (freshChat) {
+        freshChat.messages = chat.messages;
+        freshChat.updatedAt = chat.updatedAt;
+        saveChats(freshChats);
+      } else {
+        saveChats(chats);
+      }
 
       mainWindow?.webContents.send('stream-end', { chatId });
-      return { message: assistantMessage, thinking: thinkingContent, chat, streamed: true };
+      return { message: assistantMessage, thinking: currentThinkingContent, chat, streamed: true };
 
     } else {
       // Non-streaming response with optional tools
@@ -572,19 +673,29 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
 
       const response = await runWithTools();
 
+      let nonStreamThinkingContent = '';
       for (const block of response.content) {
         if (block.type === 'text') {
           assistantMessage += block.text;
         } else if (block.type === 'thinking') {
-          thinkingContent = (block as Anthropic.ThinkingBlock).thinking;
+          nonStreamThinkingContent = (block as Anthropic.ThinkingBlock).thinking;
         }
       }
 
       chat.messages.push({ role: 'assistant', content: assistantMessage });
       chat.updatedAt = Date.now();
-      saveChats(chats);
+      // Reload chats to preserve any title updates made by generate-title
+      const freshChats = loadChats();
+      const freshChat = freshChats.find(c => c.id === chatId);
+      if (freshChat) {
+        freshChat.messages = chat.messages;
+        freshChat.updatedAt = chat.updatedAt;
+        saveChats(freshChats);
+      } else {
+        saveChats(chats);
+      }
 
-      return { message: assistantMessage, thinking: thinkingContent, chat, streamed: false };
+      return { message: assistantMessage, thinking: nonStreamThinkingContent, chat, streamed: false };
     }
   } catch (error) {
     // Remove the user message if API call failed
@@ -603,8 +714,8 @@ ipcMain.handle('generate-title', async (_, chatId: string, userMessage: string) 
     const response = await anthropicClient.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 50,
-      system: 'Generate a short, concise title (3-6 words) for a chat conversation based on the user\'s first message. Output ONLY the title text, nothing else. Do not use quotation marks. Do not use emojis.',
-      messages: [{ role: 'user', content: userMessage }],
+      system: 'You are a title generator. Your ONLY job is to generate a short, concise title (3-6 words) that summarizes what the user wants to discuss. You are NOT the assistant that will respond to this message - you are just creating a title for the chat. Do NOT try to answer the user\'s question or explain capabilities. Output ONLY the title text, nothing else. Do not use quotation marks. Do not use emojis.',
+      messages: [{ role: 'user', content: `Generate a title for this chat message: "${userMessage}"` }],
     });
 
     let title = 'Untitled Chat';
@@ -654,9 +765,18 @@ ipcMain.handle('regenerate-message', async (_, chatId: string, messageIndex: num
   if (selectedMode?.prompt) {
     systemPrompt += selectedMode.prompt + '\n\n';
   }
-  const togglePrompts = enabledToggles.map(t => t.prompt).filter(p => p);
+  const togglePrompts = enabledToggles
+    .filter(t => t.name !== 'debuginfo')
+    .map(t => t.prompt)
+    .filter(p => p);
   if (togglePrompts.length > 0) {
     systemPrompt += togglePrompts.join('\n\n');
+  }
+
+  // Add debug info if enabled
+  if (settings.enabledToggles.includes('debuginfo') && settings.debugFeatures) {
+    const debugInfo = buildDebugInfo(settings, selectedMode, enabledToggles);
+    systemPrompt += '\n\n' + debugInfo;
   }
 
   // Streaming is always enabled

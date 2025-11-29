@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('api', {
   saveApiKey: (apiKey: string) => ipcRenderer.invoke('save-api-key', apiKey),
   saveMode: (mode: string) => ipcRenderer.invoke('save-mode', mode),
   saveToggles: (toggles: string[]) => ipcRenderer.invoke('save-toggles', toggles),
+  saveDebugFeatures: (enabled: boolean) => ipcRenderer.invoke('save-debug-features', enabled),
 
   // Modes and toggles
   getModes: () => ipcRenderer.invoke('get-modes'),
@@ -37,7 +38,7 @@ contextBridge.exposeInMainWorld('api', {
   onStreamEnd: (callback: (data: { chatId: string }) => void) => {
     ipcRenderer.on('stream-end', (_, data) => callback(data));
   },
-  onThinkingBlock: (callback: (data: { chatId: string; thinking: string }) => void) => {
+  onThinkingBlock: (callback: (data: { chatId: string; thinking: string; blockIndex?: number }) => void) => {
     ipcRenderer.on('thinking-block', (_, data) => callback(data));
   },
   onToolUse: (callback: (data: { chatId: string; tools: Array<{ name: string; input: unknown }> }) => void) => {

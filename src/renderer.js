@@ -25,6 +25,7 @@ const saveApiKeyBtn = document.getElementById('save-api-key');
 const modesList = document.getElementById('modes-list');
 const togglesList = document.getElementById('toggles-list');
 const darkModeBtn = document.getElementById('dark-mode-btn');
+const debugFeaturesCheckbox = document.getElementById('debug-features-checkbox');
 
 // State
 let currentChatId = null;
@@ -49,6 +50,14 @@ async function init() {
   renderModes();
   renderToggles();
   await updateApiKeyHint();
+  updateDebugFeaturesCheckbox();
+}
+
+// Update debug features checkbox based on settings
+function updateDebugFeaturesCheckbox() {
+  if (debugFeaturesCheckbox) {
+    debugFeaturesCheckbox.checked = settings.debugFeatures || false;
+  }
 }
 
 // Update API key hint based on whether app is packaged
@@ -143,6 +152,21 @@ function setupEventListeners() {
     }
   });
 
+  // Debug features checkbox
+  debugFeaturesCheckbox.addEventListener('change', async () => {
+    settings.debugFeatures = debugFeaturesCheckbox.checked;
+    await window.api.saveDebugFeatures(debugFeaturesCheckbox.checked);
+    // If disabling, also remove debuginfo from enabled toggles
+    if (!debugFeaturesCheckbox.checked) {
+      const index = settings.enabledToggles.indexOf('debuginfo');
+      if (index > -1) {
+        settings.enabledToggles.splice(index, 1);
+        await window.api.saveToggles(settings.enabledToggles);
+      }
+    }
+    renderToggles();
+  });
+
   // Message input - Enter for newline, Cmd/Ctrl+Enter to send
   messageInput.addEventListener('input', autoResizeTextarea);
   messageInput.addEventListener('keydown', (e) => {
@@ -196,9 +220,9 @@ function setupStreamListeners() {
     }
   });
 
-  window.api.onThinkingBlock(({ chatId, thinking }) => {
+  window.api.onThinkingBlock(({ chatId, thinking, blockIndex }) => {
     if (chatId === currentChatId) {
-      showThinkingBlock(thinking);
+      showThinkingBlock(thinking, blockIndex || 0);
     }
   });
 
@@ -464,6 +488,9 @@ function createMessageElement(role, content, options = {}) {
 
   const contentEl = document.createElement('div');
   contentEl.className = `message-content${renderMarkdown ? ' markdown' : ''}`;
+  if (isStreaming) {
+    contentEl.dataset.segment = '0'; // Initial segment for streaming messages
+  }
 
   if (isStreaming && !content) {
     contentEl.innerHTML = '<div class="loading-dots"><span></span><span></span><span></span></div>';
@@ -592,7 +619,6 @@ async function submitEditedMessage(messageIndex, newContent) {
   if (isLoading) return;
 
   isLoading = true;
-  toolInsertions = []; // Reset tool insertions
   sendBtn.disabled = true;
 
   try {
@@ -613,6 +639,7 @@ async function submitEditedMessage(messageIndex, newContent) {
     loadingEl.id = 'streaming-message';
     messagesDiv.appendChild(loadingEl);
     scrollToBottom();
+    currentContentSegment = 0; // Reset for new message
 
     // Send the message to get a response
     const result = await window.api.sendMessage(currentChatId, newContent);
@@ -660,7 +687,6 @@ async function regenerateMessage(messageIndex) {
   if (isLoading) return;
 
   isLoading = true;
-  toolInsertions = []; // Reset tool insertions
   sendBtn.disabled = true;
 
   // Remove the message and all after it from UI
@@ -676,6 +702,7 @@ async function regenerateMessage(messageIndex) {
   loadingEl.id = 'streaming-message';
   messagesDiv.appendChild(loadingEl);
   scrollToBottom();
+  currentContentSegment = 0; // Reset for new message
 
   try {
     const result = await window.api.regenerateMessage(currentChatId, messageIndex);
@@ -926,7 +953,9 @@ function renderMarkdownContent(text, isStreaming = false) {
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
   html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
 
-  // Headers
+  // Headers (must process from most # to least to avoid partial matches)
+  html = html.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
+  html = html.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
   html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
   html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
@@ -1033,7 +1062,7 @@ async function sendMessage() {
 
   isLoading = true;
   userScrolledDuringStream = false; // Reset scroll tracking for new message
-  toolInsertions = []; // Reset tool insertions for new message
+  currentContentSegment = 0; // Reset for new message
   sendBtn.disabled = true;
 
   // Generate title in background for first message
@@ -1099,68 +1128,38 @@ async function sendMessage() {
 let userScrolledDuringStream = false;
 let lastScrollTop = 0;
 
-// Track tool insertions by character position in the stream
-let toolInsertions = []; // Array of { position: number, element: HTMLElement }
+// Track current content segment index for interleaved content
+let currentContentSegment = 0;
 
-// Update streaming message
+// Update streaming message - streams into the current (latest) content segment
 function updateStreamingMessage(fullMessage) {
   const streamingEl = document.getElementById('streaming-message');
   if (streamingEl) {
     const renderMarkdown = settings.enabledToggles.includes('markdown');
-    const contentEl = streamingEl.querySelector('.message-content');
+
+    // Find or create the current content segment
+    let contentEl = streamingEl.querySelector(`.message-content[data-segment="${currentContentSegment}"]`);
+    if (!contentEl) {
+      contentEl = document.createElement('div');
+      contentEl.className = `message-content${renderMarkdown ? ' markdown' : ''}`;
+      contentEl.dataset.segment = currentContentSegment;
+      streamingEl.appendChild(contentEl);
+    }
     contentEl.className = `message-content${renderMarkdown ? ' markdown' : ''}`;
 
     // Store raw content for copy functionality
     streamingEl._rawContent = fullMessage;
 
-    // If we have tool insertions, we need to split the content and insert tools at correct positions
-    if (toolInsertions.length > 0) {
-      // Sort by position
-      const sortedInsertions = [...toolInsertions].sort((a, b) => a.position - b.position);
+    // Calculate what text belongs to this segment
+    // We need to track where each segment starts in the full message
+    const segmentStart = streamingEl._segmentStarts?.[currentContentSegment] || 0;
+    const segmentText = fullMessage.substring(segmentStart);
 
-      // Build content with tool blocks inserted at correct positions
-      let lastPos = 0;
-      const fragments = [];
-
-      for (const insertion of sortedInsertions) {
-        // Get text before this tool insertion
-        const textBefore = fullMessage.substring(lastPos, insertion.position);
-        if (textBefore) {
-          const span = document.createElement('span');
-          if (renderMarkdown) {
-            span.innerHTML = renderMarkdownContent(textBefore, true);
-          } else {
-            span.textContent = textBefore;
-          }
-          fragments.push(span);
-        }
-        // Add the tool block
-        fragments.push(insertion.element);
-        lastPos = insertion.position;
-      }
-
-      // Get remaining text after last tool
-      const textAfter = fullMessage.substring(lastPos);
-      if (textAfter) {
-        const span = document.createElement('span');
-        if (renderMarkdown) {
-          span.innerHTML = renderMarkdownContent(textAfter, true);
-        } else {
-          span.textContent = textAfter;
-        }
-        fragments.push(span);
-      }
-
-      // Clear and rebuild content
-      contentEl.innerHTML = '';
-      fragments.forEach(f => contentEl.appendChild(f));
+    // Render just this segment's content
+    if (renderMarkdown) {
+      contentEl.innerHTML = renderMarkdownContent(segmentText, true);
     } else {
-      // No tool insertions, render normally
-      if (renderMarkdown) {
-        contentEl.innerHTML = renderMarkdownContent(fullMessage, true);
-      } else {
-        contentEl.textContent = fullMessage;
-      }
+      contentEl.textContent = segmentText;
     }
 
     // Only auto-scroll if user hasn't scrolled up
@@ -1176,6 +1175,13 @@ function finalizeStreamingMessage() {
   if (streamingEl) {
     streamingEl.removeAttribute('id');
     streamingEl.classList.remove('streaming');
+
+    // Remove empty content segments (from tool/thinking at the end)
+    streamingEl.querySelectorAll('.message-content').forEach(el => {
+      if (!el.textContent?.trim()) {
+        el.remove();
+      }
+    });
 
     // Get the message content for action buttons
     const contentEl = streamingEl.querySelector('.message-content');
@@ -1209,38 +1215,57 @@ function finalizeStreamingMessage() {
   isLoading = false;
   sendBtn.disabled = false;
   userScrolledDuringStream = false; // Reset scroll tracking
-  toolInsertions = []; // Clear tool insertions
 }
 
-// Show thinking block
-function showThinkingBlock(thinking) {
+// Show thinking block - supports multiple blocks for interleaved thinking
+function showThinkingBlock(thinking, blockIndex = 0) {
   const streamingEl = document.getElementById('streaming-message');
   if (streamingEl) {
-    let thinkingEl = streamingEl.querySelector('.thinking-block');
+    // Look for existing thinking block with this index, or create new one
+    let thinkingEl = streamingEl.querySelector(`.thinking-block[data-index="${blockIndex}"]`);
     if (!thinkingEl) {
       thinkingEl = document.createElement('div');
       thinkingEl.className = 'thinking-block';
+      thinkingEl.dataset.index = blockIndex;
       thinkingEl.innerHTML = `
         <div class="thinking-block-header">
           <i class="ph ph-brain"></i>
-          <span>Thinking...</span>
+          <span>Thinking${blockIndex > 0 ? ` (${blockIndex + 1})` : ''}...</span>
         </div>
         <div class="thinking-block-content"></div>
       `;
-      streamingEl.insertBefore(thinkingEl, streamingEl.firstChild);
+
+      if (blockIndex === 0) {
+        // For first thinking block, insert after message-role at the start
+        const roleEl = streamingEl.querySelector('.message-role');
+        if (roleEl) {
+          roleEl.after(thinkingEl);
+        } else {
+          streamingEl.insertBefore(thinkingEl, streamingEl.firstChild);
+        }
+      } else {
+        // For subsequent thinking blocks, append at the end (after any current content)
+        // This handles: Response → Tool → Thinking(2) → Continued Response
+        streamingEl.appendChild(thinkingEl);
+
+        // Start a new content segment for any text that comes after this thinking block
+        const currentLength = streamingEl._rawContent?.length || 0;
+        currentContentSegment++;
+        if (!streamingEl._segmentStarts) {
+          streamingEl._segmentStarts = {};
+        }
+        streamingEl._segmentStarts[currentContentSegment] = currentLength;
+      }
     }
     thinkingEl.querySelector('.thinking-block-content').textContent = thinking;
     scrollToBottom();
   }
 }
 
-// Show tool use indicator - inserts inline at current position in the message
+// Show tool use indicator - appends at end and starts new content segment for subsequent text
 function showToolUse(tools) {
   const streamingEl = document.getElementById('streaming-message');
   if (streamingEl) {
-    // Get the current position in the stream (length of raw content so far)
-    const currentPosition = streamingEl._rawContent ? streamingEl._rawContent.length : 0;
-
     // Create a new tool block
     const toolEl = document.createElement('div');
     toolEl.className = 'tool-use-block tool-use-inline';
@@ -1260,14 +1285,18 @@ function showToolUse(tools) {
       <div class="tool-use-content">${toolNames}</div>
     `;
 
-    // Record this tool insertion with its position
-    toolInsertions.push({ position: currentPosition, element: toolEl });
+    // Append tool block at the end (after any current content)
+    streamingEl.appendChild(toolEl);
 
-    // Immediately append to show it (will be repositioned on next update)
-    const contentEl = streamingEl.querySelector('.message-content');
-    if (contentEl) {
-      contentEl.appendChild(toolEl);
+    // Start a new content segment for any text that comes after this tool
+    // Record where the new segment starts in the full message
+    const currentLength = streamingEl._rawContent?.length || 0;
+    currentContentSegment++;
+    if (!streamingEl._segmentStarts) {
+      streamingEl._segmentStarts = {};
     }
+    streamingEl._segmentStarts[currentContentSegment] = currentLength;
+
     scrollToBottom();
   }
 }
@@ -1309,6 +1338,10 @@ function renderModes() {
 // Check if a toggle's dependency is satisfied
 function isToggleDependencySatisfied(toggle) {
   if (!toggle.dependsOn) return true;
+  // Special case for debugfeatures - check settings.debugFeatures instead of toggles
+  if (toggle.dependsOn === 'debugfeatures') {
+    return settings.debugFeatures === true;
+  }
   return settings.enabledToggles.includes(toggle.dependsOn);
 }
 
@@ -1322,8 +1355,13 @@ function getToggleDisplayName(name) {
 function renderToggles() {
   togglesList.innerHTML = '';
 
-  // Filter out darkmode - it's now in the sidebar
-  const visibleToggles = toggles.filter(t => t.name !== 'darkmode');
+  // Filter out darkmode (in sidebar) and debuginfo (when debug features disabled)
+  const visibleToggles = toggles.filter(t => {
+    if (t.name === 'darkmode') return false;
+    // Only show debuginfo when debug features is enabled
+    if (t.name === 'debuginfo' && !settings.debugFeatures) return false;
+    return true;
+  });
 
   visibleToggles.forEach(toggle => {
     const item = document.createElement('div');
