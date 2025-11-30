@@ -84,6 +84,20 @@ async function init() {
   updateDebugFeaturesCheckbox();
   updateShowThinkingCheckbox();
   updateToolbarActions();
+  await updateActiveBranchNotice();
+}
+
+// Update active branch notice visibility
+async function updateActiveBranchNotice() {
+  const notice = document.getElementById('active-branch-notice');
+  if (!notice) return;
+
+  const isOnActiveBranch = await window.api.isOnActiveBranch();
+  if (isOnActiveBranch) {
+    notice.classList.remove('hidden');
+  } else {
+    notice.classList.add('hidden');
+  }
 }
 
 // Update debug features checkbox based on settings

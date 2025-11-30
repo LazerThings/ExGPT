@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('api', {
   getModes: () => ipcRenderer.invoke('get-modes'),
   getToggles: () => ipcRenderer.invoke('get-toggles'),
   isPackaged: () => ipcRenderer.invoke('is-packaged'),
+  isOnActiveBranch: () => ipcRenderer.invoke('is-on-active-branch'),
 
   // Messages
   sendMessage: (chatId: string, message: string) => ipcRenderer.invoke('send-message', chatId, message),

@@ -442,6 +442,18 @@ ipcMain.handle('get-modes', () => loadModes());
 ipcMain.handle('get-toggles', () => TOGGLES);
 ipcMain.handle('is-packaged', () => app.isPackaged);
 
+// Active branch check
+ipcMain.handle('is-on-active-branch', () => {
+  const basePath = app.isPackaged ? app.getAppPath() : path.join(__dirname, '..');
+  const packageJsonPath = path.join(basePath, 'package.json');
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+    return packageJson.isOnActiveBranch === true;
+  } catch {
+    return false;
+  }
+});
+
 // Send message to Claude
 ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) => {
   if (!anthropicClient) {
