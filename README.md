@@ -24,3 +24,6 @@ npm run dist:all:nodev # Builds for all platforms except like dist:mac:nodev for
 Uses Electron Builder.
 
 To update, you can instal the latest binary from the Releases and replace the old binary. Data is stored in Electron app data.
+
+## Active Branch
+The `active` branch is where active development goes on. Generally consider don't using it unless you know what you are doing. It is periodically merged into the `main` branch for stable updates to the app. Only use the `active` branch if you would like to see active updates, but please note that it will have bugs, most likely. Your app will tell you if you are running the active branch.
