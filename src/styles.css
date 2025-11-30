@@ -598,6 +598,61 @@ body {
   font-size: 0.9em;
 }
 
+/* Code block container with header */
+.code-block-container {
+  margin: 12px 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--code-bg);
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.code-block-lang {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: lowercase;
+}
+
+.code-block-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.code-block-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+
+.code-block-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+
+.code-block-btn i {
+  font-size: 14px;
+}
+
+.code-block-container pre {
+  margin: 0;
+  border-radius: 0;
+}
+
 .message-content.markdown pre {
   background: var(--code-bg);
   color: var(--code-text);
@@ -605,6 +660,11 @@ body {
   border-radius: var(--radius);
   overflow-x: auto;
   margin: 12px 0;
+}
+
+.message-content.markdown .code-block-container pre {
+  margin: 0;
+  border-radius: 0;
 }
 
 .message-content.markdown pre code {

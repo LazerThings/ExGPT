@@ -912,6 +912,38 @@ window.reloadLiveFrame = function(frameId) {
   }
 };
 
+// Copy code block to clipboard
+window.copyCodeBlock = async function(blockId) {
+  const pre = document.getElementById(blockId);
+  if (pre) {
+    const encodedContent = pre.dataset.code;
+    const content = decodeURIComponent(escape(atob(encodedContent)));
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch (error) {
+      console.error('Failed to copy code:', error);
+    }
+  }
+};
+
+// Download code block as file
+window.downloadCodeBlock = function(blockId, extension) {
+  const pre = document.getElementById(blockId);
+  if (pre) {
+    const encodedContent = pre.dataset.code;
+    const content = decodeURIComponent(escape(atob(encodedContent)));
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `code.${extension}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+};
+
 // GFM Markdown renderer
 function renderMarkdownContent(text, isStreaming = false) {
   if (!text) return '';
@@ -964,6 +996,7 @@ function renderMarkdownContent(text, isStreaming = false) {
 
   // Fenced code blocks with language
   const syntaxHighlightEnabled = settings.enabledToggles.includes('syntaxhighlight');
+  let codeBlockCounter = 0;
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
     // Unescape HTML entities for proper highlighting (content was escaped earlier)
     const codeContent = code.trim()
@@ -973,35 +1006,58 @@ function renderMarkdownContent(text, isStreaming = false) {
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'");
 
+    const blockId = `code-block-${Date.now()}-${codeBlockCounter++}`;
+    const displayLang = lang || 'code';
+    const extension = lang || 'txt';
+
+    // Store code content for copy/download (base64 encode to safely embed)
+    const encodedContent = btoa(unescape(encodeURIComponent(codeContent)));
+
+    const header = `<div class="code-block-header">
+      <span class="code-block-lang">${displayLang}</span>
+      <div class="code-block-actions">
+        <button class="code-block-btn" onclick="copyCodeBlock('${blockId}')" title="Copy code">
+          <i class="ph ph-copy"></i>
+        </button>
+        <button class="code-block-btn" onclick="downloadCodeBlock('${blockId}', '${extension}')" title="Download file">
+          <i class="ph ph-download-simple"></i>
+        </button>
+      </div>
+    </div>`;
+
+    let codeHtml;
     if (syntaxHighlightEnabled && typeof hljs !== 'undefined' && lang) {
       try {
         // Try to highlight with the specified language
         const highlighted = hljs.highlight(codeContent, { language: lang, ignoreIllegals: true });
-        return `<pre><code class="hljs language-${lang}">${highlighted.value}</code></pre>`;
+        codeHtml = `<code class="hljs language-${lang}">${highlighted.value}</code>`;
       } catch (e) {
         // Fall back to auto-detection or plain text
         try {
           const highlighted = hljs.highlightAuto(codeContent);
-          return `<pre><code class="hljs">${highlighted.value}</code></pre>`;
+          codeHtml = `<code class="hljs">${highlighted.value}</code>`;
         } catch (e2) {
           // Re-escape for non-highlighted display
           const escaped = codeContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-          return `<pre><code class="language-${lang}">${escaped}</code></pre>`;
+          codeHtml = `<code class="language-${lang}">${escaped}</code>`;
         }
       }
     } else if (syntaxHighlightEnabled && typeof hljs !== 'undefined') {
       // No language specified, try auto-detection
       try {
         const highlighted = hljs.highlightAuto(codeContent);
-        return `<pre><code class="hljs">${highlighted.value}</code></pre>`;
+        codeHtml = `<code class="hljs">${highlighted.value}</code>`;
       } catch (e) {
         const escaped = codeContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        return `<pre><code>${escaped}</code></pre>`;
+        codeHtml = `<code>${escaped}</code>`;
       }
+    } else {
+      // Re-escape for non-highlighted display
+      const escaped = codeContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      codeHtml = `<code class="language-${lang}">${escaped}</code>`;
     }
-    // Re-escape for non-highlighted display
-    const escaped = codeContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return `<pre><code class="language-${lang}">${escaped}</code></pre>`;
+
+    return `<div class="code-block-container">${header}<pre id="${blockId}" data-code="${encodedContent}">${codeHtml}</pre></div>`;
   });
 
   // Inline code (must come after code blocks)

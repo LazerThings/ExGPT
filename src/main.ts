@@ -61,7 +61,7 @@ const TOGGLES: Toggle[] = [
     name: 'markdown',
     displayName: 'Markdown Rendering',
     icon: 'ph-text-aa',
-    prompt: 'Your responses will be rendered as GitHub Flavored Markdown (GFM). Use formatting like **bold**, *italic*, ~~strikethrough~~, `inline code`, fenced code blocks with language hints, tables, task lists, and other GFM features. Note: HTML is not supported, only pure GFM syntax.',
+    prompt: 'Your responses will be rendered as GitHub Flavored Markdown (GFM). Use formatting like **bold**, *italic*, ~~strikethrough~~, `inline code`, fenced code blocks with language hints, tables, task lists, and other GFM features. Note: HTML is not supported, only pure GFM syntax. IMPORTANT: Always specify a file extension (not full language name) for code blocks so syntax highlighting and downloads work properly. Use: ```js (not javascript), ```ts (not typescript), ```py (not python), ```rb (not ruby), ```sh (not bash/shell), ```html, ```css, ```json, ```md, ```yml, ```sql, ```c, ```cpp, ```go, ```rs (not rust), ```swift, ```kt (not kotlin), etc.',
   },
   {
     name: 'timestamps',
