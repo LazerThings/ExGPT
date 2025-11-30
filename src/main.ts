@@ -77,6 +77,73 @@ const TOGGLES: Toggle[] = [
     dependsOn: 'markdown',
   },
   {
+    name: 'nativehtmlstyle',
+    displayName: 'Native HTML Styling',
+    icon: 'ph-paint-roller',
+    prompt: `When creating live HTML previews, style them to match the ExGPT app's native look and feel. Use these design specifications:
+
+FONTS (include these @import statements in your <head>):
+@import url('https://fonts.googleapis.com/css2?family=Jura:wght@300..700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Ubuntu+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+
+- Primary font (body text, headings): 'Jura', sans-serif
+- Monospace font (code, technical): 'Ubuntu Mono', monospace
+- Base font size: 15px
+- Line height: 1.6
+
+LIGHT THEME COLORS:
+- Primary (accent/brand): #22c55e (green)
+- Primary light: #4ade80
+- Primary dark: #16a34a
+- Primary subtle (backgrounds): #dcfce7
+- Primary bg: #f0fdf4
+- Background: #ffffff
+- Background secondary: #f9fafb
+- Background tertiary: #f3f4f6
+- Text: #111827
+- Text secondary: #6b7280
+- Text muted: #9ca3af
+- Border: #e5e7eb
+- Border light: #f3f4f6
+- Code block bg: #1f2937
+- Code block text: #f9fafb
+
+DARK THEME COLORS (use @media (prefers-color-scheme: dark) or provide both):
+- Primary (accent/brand): #22c55e (same green)
+- Primary subtle: rgba(34, 197, 94, 0.15)
+- Primary bg: rgba(34, 197, 94, 0.1)
+- Background: #0f0f0f
+- Background secondary: #1a1a1a
+- Background tertiary: #262626
+- Text: #f5f5f5
+- Text secondary: #a3a3a3
+- Text muted: #737373
+- Border: #333333
+- Border light: #262626
+- Code block bg: #0a0a0a
+- Code block text: #e5e5e5
+
+BORDER RADIUS:
+- Small: 6px
+- Default: 10px
+- Large: 16px
+
+SHADOWS (light theme):
+- Small: 0 1px 2px rgba(0, 0, 0, 0.05)
+- Default: 0 4px 6px -1px rgba(0, 0, 0, 0.1)
+- Large: 0 10px 15px -3px rgba(0, 0, 0, 0.1)
+
+SHADOWS (dark theme):
+- Small: 0 1px 2px rgba(0, 0, 0, 0.3)
+- Default: 0 4px 6px -1px rgba(0, 0, 0, 0.4)
+- Large: 0 10px 15px -3px rgba(0, 0, 0, 0.5)
+
+TRANSITIONS: Use 0.2s ease for smooth animations.
+
+Apply these styles consistently to make live HTML previews feel integrated with the app.`,
+    dependsOn: 'livehtml',
+  },
+  {
     name: 'syntaxhighlight',
     displayName: 'Syntax Highlighting',
     icon: 'ph-highlighter-circle',
