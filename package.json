@@ -1,7 +1,7 @@
 {
   "name": "exgpt",
-  "version": "1.1.0",
-  "isOnActiveBranch": false,
+  "version": "1.1.0+ Active Branch",
+  "isOnActiveBranch": true,
   "description": "A minimalist Claude chat application",
   "main": "dist/main.js",
   "scripts": {
