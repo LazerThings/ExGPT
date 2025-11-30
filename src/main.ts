@@ -12,10 +12,17 @@ const chatsPath = path.join(userDataPath, 'chats.json');
 const settingsPath = path.join(userDataPath, 'settings.json');
 
 // Types
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  thinking?: string[];  // Array of thinking blocks for assistant messages
+  toolUses?: Array<{ name: string; input: Record<string, unknown> }>;  // Array of tool uses for assistant messages
+}
+
 interface Chat {
   id: string;
   name: string;
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;
 }
@@ -25,6 +32,7 @@ interface Settings {
   selectedMode: string;
   enabledToggles: string[];
   debugFeatures?: boolean;
+  showThinkingByDefault?: boolean;
 }
 
 interface Mode {
@@ -252,7 +260,7 @@ function loadSettings(): Settings {
   } catch {
     console.error('Error loading settings');
   }
-  return { apiKey: '', selectedMode: 'conversational', enabledToggles: ['markdown'], debugFeatures: false };
+  return { apiKey: '', selectedMode: 'conversational', enabledToggles: ['markdown'], debugFeatures: false, showThinkingByDefault: false };
 }
 
 function saveSettings(settings: Settings): void {
@@ -422,6 +430,13 @@ ipcMain.handle('save-debug-features', (_, enabled: boolean) => {
   return true;
 });
 
+ipcMain.handle('save-show-thinking-by-default', (_, enabled: boolean) => {
+  const settings = loadSettings();
+  settings.showThinkingByDefault = enabled;
+  saveSettings(settings);
+  return true;
+});
+
 // Modes and toggles
 ipcMain.handle('get-modes', () => loadModes());
 ipcMain.handle('get-toggles', () => TOGGLES);
@@ -467,9 +482,6 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
   // Add user message to chat
   chat.messages.push({ role: 'user', content: userMessage });
 
-  // Streaming is always enabled
-  const isStreaming = true;
-
   // Check which tools are enabled
   const enabledToolNames: string[] = [];
   if (settings.enabledToggles.includes('webfetch')) {
@@ -492,211 +504,144 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
     let assistantMessage = '';
     let thinkingBlockIndex = 0;
     let currentThinkingContent = '';
+    const collectedThinkingBlocks: string[] = [];  // Collect all thinking blocks
+    const collectedToolUses: Array<{ name: string; input: Record<string, unknown> }> = [];  // Collect all tool uses
 
-    if (isStreaming) {
-      // Streaming response with optional tools
-      const runStreamWithTools = async (): Promise<void> => {
-        const streamParams: Anthropic.MessageStreamParams = {
-          model,
-          max_tokens: maxTokens,
-          system: systemPrompt,
-          messages: apiMessages,
-        };
-
-        // Add tools if enabled
-        if (hasTools) {
-          streamParams.tools = enabledTools;
-        }
-
-        // Add extended thinking if enabled
-        if (selectedMode?.extendedThinking && selectedMode?.thinkingBudget) {
-          streamParams.thinking = {
-            type: 'enabled',
-            budget_tokens: selectedMode.thinkingBudget,
-          };
-        }
-
-        // Use beta API if we have both tools and thinking (interleaved thinking)
-        const needsInterleavedThinking = hasTools && selectedMode?.extendedThinking && selectedMode?.thinkingBudget;
-        const stream = needsInterleavedThinking
-          ? anthropicClient!.beta.messages.stream({ ...streamParams, betas: ['interleaved-thinking-2025-05-14'] })
-          : anthropicClient!.messages.stream(streamParams);
-
-        // Collect tool uses during streaming
-        const pendingToolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
-
-        stream.on('text', (text) => {
-          assistantMessage += text;
-          mainWindow?.webContents.send('stream-chunk', { chatId, text, fullMessage: assistantMessage });
-        });
-
-        // Handle streaming thinking deltas - supports multiple thinking blocks (interleaved thinking)
-        stream.on('thinking', (_thinkingDelta, thinkingSnapshot) => {
-          currentThinkingContent = thinkingSnapshot;
-          mainWindow?.webContents.send('thinking-block', {
-            chatId,
-            thinking: currentThinkingContent,
-            blockIndex: thinkingBlockIndex
-          });
-        });
-
-        // Collect tool use and thinking blocks as they complete
-        stream.on('contentBlock', (block) => {
-          if (block.type === 'tool_use') {
-            pendingToolUses.push({
-              id: block.id,
-              name: block.name,
-              input: block.input as Record<string, unknown>,
-            });
-            // Notify UI about tool use
-            mainWindow?.webContents.send('tool-use', { chatId, tools: [{ name: block.name, input: block.input }] });
-          } else if (block.type === 'thinking') {
-            // Thinking block completed - increment index for next thinking block
-            thinkingBlockIndex++;
-            currentThinkingContent = '';
-          }
-        });
-
-        const finalMessage = await stream.finalMessage();
-
-        // If there are tool uses, process them and continue
-        if (finalMessage.stop_reason === 'tool_use' && pendingToolUses.length > 0) {
-          // Add assistant's response to messages
-          // Clean up content blocks to remove extra fields from beta API (like 'parsed')
-          // but preserve required fields like 'signature' for thinking blocks
-          const cleanContent = finalMessage.content.map(block => {
-            if (block.type === 'text') {
-              return { type: 'text' as const, text: block.text };
-            } else if (block.type === 'tool_use') {
-              return { type: 'tool_use' as const, id: block.id, name: block.name, input: block.input };
-            } else if (block.type === 'thinking') {
-              // Must include signature for thinking blocks
-              return { type: 'thinking' as const, thinking: block.thinking, signature: (block as { signature?: string }).signature };
-            }
-            return block;
-          });
-          apiMessages.push({ role: 'assistant', content: cleanContent as Anthropic.ContentBlockParam[] });
-
-          // Process each tool call
-          const toolResults: Anthropic.ToolResultBlockParam[] = [];
-          for (const toolUse of pendingToolUses) {
-            const result = await executeTool(toolUse.name, toolUse.input);
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: toolUse.id,
-              content: result,
-            });
-          }
-
-          // Add tool results
-          apiMessages.push({ role: 'user', content: toolResults });
-
-          // Continue the conversation (recursive call for more tool use)
-          await runStreamWithTools();
-        }
+    // Streaming response with optional tools
+    const runStreamWithTools = async (): Promise<void> => {
+      const streamParams: Anthropic.MessageStreamParams = {
+        model,
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: apiMessages,
       };
 
-      await runStreamWithTools();
-
-      chat.messages.push({ role: 'assistant', content: assistantMessage });
-      chat.updatedAt = Date.now();
-      // Reload chats to preserve any title updates made by generate-title
-      const freshChats = loadChats();
-      const freshChat = freshChats.find(c => c.id === chatId);
-      if (freshChat) {
-        freshChat.messages = chat.messages;
-        freshChat.updatedAt = chat.updatedAt;
-        saveChats(freshChats);
-      } else {
-        saveChats(chats);
+      // Add tools if enabled
+      if (hasTools) {
+        streamParams.tools = enabledTools;
       }
 
-      mainWindow?.webContents.send('stream-end', { chatId });
-      return { message: assistantMessage, thinking: currentThinkingContent, chat, streamed: true };
-
-    } else {
-      // Non-streaming response with optional tools
-      const runWithTools = async (): Promise<Anthropic.Message> => {
-        const createParams: Anthropic.MessageCreateParams = {
-          model,
-          max_tokens: maxTokens,
-          system: systemPrompt,
-          messages: apiMessages,
+      // Add extended thinking if enabled
+      if (selectedMode?.extendedThinking && selectedMode?.thinkingBudget) {
+        streamParams.thinking = {
+          type: 'enabled',
+          budget_tokens: selectedMode.thinkingBudget,
         };
+      }
 
-        // Add tools if enabled
-        if (hasTools) {
-          createParams.tools = enabledTools;
-        }
+      // Use beta API if we have both tools and thinking (interleaved thinking)
+      const needsInterleavedThinking = hasTools && selectedMode?.extendedThinking && selectedMode?.thinkingBudget;
+      const stream = needsInterleavedThinking
+        ? anthropicClient!.beta.messages.stream({ ...streamParams, betas: ['interleaved-thinking-2025-05-14'] })
+        : anthropicClient!.messages.stream(streamParams);
 
-        // Add extended thinking if enabled (but not with tools)
-        if (!hasTools && selectedMode?.extendedThinking && selectedMode?.thinkingBudget) {
-          createParams.thinking = {
-            type: 'enabled',
-            budget_tokens: selectedMode.thinkingBudget,
-          };
-        }
+      // Collect tool uses during streaming
+      const pendingToolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
 
-        const response = await anthropicClient!.messages.create(createParams);
+      stream.on('text', (text) => {
+        assistantMessage += text;
+        mainWindow?.webContents.send('stream-chunk', { chatId, text, fullMessage: assistantMessage });
+      });
 
-        // If there are tool uses, process them and continue
-        if (response.stop_reason === 'tool_use') {
+      // Handle streaming thinking deltas - supports multiple thinking blocks (interleaved thinking)
+      stream.on('thinking', (_thinkingDelta, thinkingSnapshot) => {
+        currentThinkingContent = thinkingSnapshot;
+        mainWindow?.webContents.send('thinking-block', {
+          chatId,
+          thinking: currentThinkingContent,
+          blockIndex: thinkingBlockIndex
+        });
+      });
+
+      // Collect tool use and thinking blocks as they complete
+      stream.on('contentBlock', (block) => {
+        if (block.type === 'tool_use') {
+          pendingToolUses.push({
+            id: block.id,
+            name: block.name,
+            input: block.input as Record<string, unknown>,
+          });
+          // Collect for persistence
+          collectedToolUses.push({
+            name: block.name,
+            input: block.input as Record<string, unknown>,
+          });
           // Notify UI about tool use
-          const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
-          mainWindow?.webContents.send('tool-use', { chatId, tools: toolUseBlocks });
-
-          // Add assistant's response to messages
-          apiMessages.push({ role: 'assistant', content: response.content });
-
-          // Process each tool call
-          const toolResults: Anthropic.ToolResultBlockParam[] = [];
-          for (const block of response.content) {
-            if (block.type === 'tool_use') {
-              const result = await executeTool(block.name, block.input as Record<string, unknown>);
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: block.id,
-                content: result,
-              });
-            }
-          }
-
-          // Add tool results
-          apiMessages.push({ role: 'user', content: toolResults });
-
-          // Continue the conversation (recursive call for more tool use)
-          return runWithTools();
-        }
-
-        return response;
-      };
-
-      const response = await runWithTools();
-
-      let nonStreamThinkingContent = '';
-      for (const block of response.content) {
-        if (block.type === 'text') {
-          assistantMessage += block.text;
+          mainWindow?.webContents.send('tool-use', { chatId, tools: [{ name: block.name, input: block.input }] });
         } else if (block.type === 'thinking') {
-          nonStreamThinkingContent = (block as Anthropic.ThinkingBlock).thinking;
+          // Thinking block completed - save it and increment index for next thinking block
+          if (block.thinking) {
+            collectedThinkingBlocks.push(block.thinking);
+          }
+          thinkingBlockIndex++;
+          currentThinkingContent = '';
         }
-      }
+      });
 
-      chat.messages.push({ role: 'assistant', content: assistantMessage });
-      chat.updatedAt = Date.now();
-      // Reload chats to preserve any title updates made by generate-title
-      const freshChats = loadChats();
-      const freshChat = freshChats.find(c => c.id === chatId);
-      if (freshChat) {
-        freshChat.messages = chat.messages;
-        freshChat.updatedAt = chat.updatedAt;
-        saveChats(freshChats);
-      } else {
-        saveChats(chats);
-      }
+      const finalMessage = await stream.finalMessage();
 
-      return { message: assistantMessage, thinking: nonStreamThinkingContent, chat, streamed: false };
+      // If there are tool uses, process them and continue
+      if (finalMessage.stop_reason === 'tool_use' && pendingToolUses.length > 0) {
+        // Add assistant's response to messages
+        // Clean up content blocks to remove extra fields from beta API (like 'parsed')
+        // but preserve required fields like 'signature' for thinking blocks
+        const cleanContent = finalMessage.content.map(block => {
+          if (block.type === 'text') {
+            return { type: 'text' as const, text: block.text };
+          } else if (block.type === 'tool_use') {
+            return { type: 'tool_use' as const, id: block.id, name: block.name, input: block.input };
+          } else if (block.type === 'thinking') {
+            // Must include signature for thinking blocks
+            return { type: 'thinking' as const, thinking: block.thinking, signature: (block as { signature?: string }).signature };
+          }
+          return block;
+        });
+        apiMessages.push({ role: 'assistant', content: cleanContent as Anthropic.ContentBlockParam[] });
+
+        // Process each tool call
+        const toolResults: Anthropic.ToolResultBlockParam[] = [];
+        for (const toolUse of pendingToolUses) {
+          const result = await executeTool(toolUse.name, toolUse.input);
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: result,
+          });
+        }
+
+        // Add tool results
+        apiMessages.push({ role: 'user', content: toolResults });
+
+        // Continue the conversation (recursive call for more tool use)
+        await runStreamWithTools();
+      }
+    };
+
+    await runStreamWithTools();
+
+    // Store the message with thinking blocks and tool uses if any were collected
+    const assistantMsg: ChatMessage = { role: 'assistant', content: assistantMessage };
+    if (collectedThinkingBlocks.length > 0) {
+      assistantMsg.thinking = collectedThinkingBlocks;
     }
+    if (collectedToolUses.length > 0) {
+      assistantMsg.toolUses = collectedToolUses;
+    }
+    chat.messages.push(assistantMsg);
+    chat.updatedAt = Date.now();
+    // Reload chats to preserve any title updates made by generate-title
+    const freshChats = loadChats();
+    const freshChat = freshChats.find(c => c.id === chatId);
+    if (freshChat) {
+      freshChat.messages = chat.messages;
+      freshChat.updatedAt = chat.updatedAt;
+      saveChats(freshChats);
+    } else {
+      saveChats(chats);
+    }
+
+    mainWindow?.webContents.send('stream-end', { chatId });
+    return { message: assistantMessage, thinking: currentThinkingContent, chat };
   } catch (error) {
     // Remove the user message if API call failed
     chat.messages.pop();
@@ -779,92 +724,67 @@ ipcMain.handle('regenerate-message', async (_, chatId: string, messageIndex: num
     systemPrompt += '\n\n' + debugInfo;
   }
 
-  // Streaming is always enabled
-  const isStreaming = true;
   const maxTokens = selectedMode?.maxTokens || 8192;
   const model = selectedMode?.model || 'claude-sonnet-4-20250514';
 
   try {
-    if (isStreaming) {
-      const streamParams: Anthropic.MessageStreamParams = {
-        model,
-        max_tokens: maxTokens,
-        system: systemPrompt,
-        messages: chat.messages.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
+    const streamParams: Anthropic.MessageStreamParams = {
+      model,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: chat.messages.map(m => ({
+        role: m.role,
+        content: m.content,
+      })),
+    };
+
+    if (selectedMode?.extendedThinking && selectedMode?.thinkingBudget) {
+      streamParams.thinking = {
+        type: 'enabled',
+        budget_tokens: selectedMode.thinkingBudget,
       };
-
-      if (selectedMode?.extendedThinking && selectedMode?.thinkingBudget) {
-        streamParams.thinking = {
-          type: 'enabled',
-          budget_tokens: selectedMode.thinkingBudget,
-        };
-      }
-
-      const stream = anthropicClient.messages.stream(streamParams);
-
-      let assistantMessage = '';
-      let thinkingContent = '';
-
-      stream.on('text', (text) => {
-        assistantMessage += text;
-        mainWindow?.webContents.send('stream-chunk', { chatId, text, fullMessage: assistantMessage });
-      });
-
-      stream.on('contentBlock', (block) => {
-        if (block.type === 'thinking') {
-          thinkingContent = block.thinking;
-          mainWindow?.webContents.send('thinking-block', { chatId, thinking: thinkingContent });
-        }
-      });
-
-      await stream.finalMessage();
-
-      chat.messages.push({ role: 'assistant', content: assistantMessage });
-      chat.updatedAt = Date.now();
-      saveChats(chats);
-
-      mainWindow?.webContents.send('stream-end', { chatId });
-      return { message: assistantMessage, thinking: thinkingContent, chat, streamed: true };
-    } else {
-      const createParams: Anthropic.MessageCreateParams = {
-        model,
-        max_tokens: maxTokens,
-        system: systemPrompt,
-        messages: chat.messages.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
-      };
-
-      if (selectedMode?.extendedThinking && selectedMode?.thinkingBudget) {
-        createParams.thinking = {
-          type: 'enabled',
-          budget_tokens: selectedMode.thinkingBudget,
-        };
-      }
-
-      const response = await anthropicClient.messages.create(createParams);
-
-      let assistantMessage = '';
-      let thinkingContent = '';
-
-      for (const block of response.content) {
-        if (block.type === 'text') {
-          assistantMessage += block.text;
-        } else if (block.type === 'thinking') {
-          thinkingContent = block.thinking;
-        }
-      }
-
-      chat.messages.push({ role: 'assistant', content: assistantMessage });
-      chat.updatedAt = Date.now();
-      saveChats(chats);
-
-      return { message: assistantMessage, thinking: thinkingContent, chat, streamed: false };
     }
+
+    const stream = anthropicClient.messages.stream(streamParams);
+
+    let assistantMessage = '';
+    let thinkingContent = '';
+    const regenThinkingBlocks: string[] = [];
+    let regenThinkingBlockIndex = 0;
+
+    stream.on('text', (text) => {
+      assistantMessage += text;
+      mainWindow?.webContents.send('stream-chunk', { chatId, text, fullMessage: assistantMessage });
+    });
+
+    stream.on('thinking', (_thinkingDelta, thinkingSnapshot) => {
+      thinkingContent = thinkingSnapshot;
+      mainWindow?.webContents.send('thinking-block', { chatId, thinking: thinkingContent, blockIndex: regenThinkingBlockIndex });
+    });
+
+    stream.on('contentBlock', (block) => {
+      if (block.type === 'thinking') {
+        if (block.thinking) {
+          regenThinkingBlocks.push(block.thinking);
+        }
+        regenThinkingBlockIndex++;
+        thinkingContent = '';
+      }
+    });
+
+    await stream.finalMessage();
+
+    // Store the message with thinking blocks if any were collected
+    const regenMsg: ChatMessage = { role: 'assistant', content: assistantMessage };
+    if (regenThinkingBlocks.length > 0) {
+      regenMsg.thinking = regenThinkingBlocks;
+    }
+    chat.messages.push(regenMsg);
+    chat.updatedAt = Date.now();
+    saveChats(chats);
+
+    mainWindow?.webContents.send('stream-end', { chatId });
+    return { message: assistantMessage, thinking: thinkingContent, chat };
   } catch (error) {
     throw error;
   }

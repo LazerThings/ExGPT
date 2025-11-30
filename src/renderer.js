@@ -26,6 +26,23 @@ const modesList = document.getElementById('modes-list');
 const togglesList = document.getElementById('toggles-list');
 const darkModeBtn = document.getElementById('dark-mode-btn');
 const debugFeaturesCheckbox = document.getElementById('debug-features-checkbox');
+const showThinkingCheckbox = document.getElementById('show-thinking-checkbox');
+
+// Search and Overview elements
+const topBar = document.getElementById('top-bar');
+const overviewTopBar = document.getElementById('overview-top-bar');
+const overviewChatTitle = document.getElementById('overview-chat-title');
+const toolbarChatActions = document.getElementById('toolbar-chat-actions');
+const searchMessagesBtn = document.getElementById('search-messages-btn');
+const overviewBtn = document.getElementById('overview-btn');
+const closeOverviewBtn = document.getElementById('close-overview-btn');
+const searchPanel = document.getElementById('search-panel');
+const messageSearchInput = document.getElementById('message-search-input');
+const closeSearchBtn = document.getElementById('close-search-btn');
+const searchResults = document.getElementById('search-results');
+const overviewView = document.getElementById('overview-view');
+const overviewCards = document.getElementById('overview-cards');
+const messagesContainer = document.getElementById('messages-container');
 
 // State
 let currentChatId = null;
@@ -39,6 +56,20 @@ let settings = {
 let isLoading = false;
 let searchQuery = '';
 
+// Update loading state and input container appearance
+function setLoading(loading) {
+  isLoading = loading;
+  const inputContainer = document.querySelector('.input-container');
+  if (inputContainer) {
+    if (loading) {
+      inputContainer.classList.add('loading');
+    } else {
+      inputContainer.classList.remove('loading');
+    }
+  }
+  sendBtn.disabled = loading;
+}
+
 // Initialize
 async function init() {
   await loadData();
@@ -51,12 +82,21 @@ async function init() {
   renderToggles();
   await updateApiKeyHint();
   updateDebugFeaturesCheckbox();
+  updateShowThinkingCheckbox();
+  updateToolbarActions();
 }
 
 // Update debug features checkbox based on settings
 function updateDebugFeaturesCheckbox() {
   if (debugFeaturesCheckbox) {
     debugFeaturesCheckbox.checked = settings.debugFeatures || false;
+  }
+}
+
+// Update show thinking checkbox based on settings
+function updateShowThinkingCheckbox() {
+  if (showThinkingCheckbox) {
+    showThinkingCheckbox.checked = settings.showThinkingByDefault || false;
   }
 }
 
@@ -167,6 +207,12 @@ function setupEventListeners() {
     renderToggles();
   });
 
+  // Show thinking by default checkbox
+  showThinkingCheckbox.addEventListener('change', async () => {
+    settings.showThinkingByDefault = showThinkingCheckbox.checked;
+    await window.api.saveShowThinkingByDefault(showThinkingCheckbox.checked);
+  });
+
   // Message input - Enter for newline, Cmd/Ctrl+Enter to send
   messageInput.addEventListener('input', autoResizeTextarea);
   messageInput.addEventListener('keydown', (e) => {
@@ -203,6 +249,31 @@ function setupEventListeners() {
     header.addEventListener('click', () => {
       header.parentElement.classList.toggle('open');
     });
+  });
+
+  // Search messages button
+  searchMessagesBtn.addEventListener('click', () => {
+    toggleSearchPanel();
+  });
+
+  // Close search button
+  closeSearchBtn.addEventListener('click', () => {
+    closeSearchPanel();
+  });
+
+  // Message search input
+  messageSearchInput.addEventListener('input', (e) => {
+    performMessageSearch(e.target.value);
+  });
+
+  // Overview button
+  overviewBtn.addEventListener('click', () => {
+    showOverviewView();
+  });
+
+  // Close overview button
+  closeOverviewBtn.addEventListener('click', () => {
+    closeOverviewView();
   });
 }
 
@@ -375,6 +446,8 @@ function showNewChatScreen() {
   renderChatList();
   leftSidebar.classList.remove('open');
   updateOverlay();
+  updateToolbarActions();
+  closeSearchPanel();
 }
 
 // Create new chat (called when user sends first message)
@@ -398,6 +471,12 @@ async function selectChat(id) {
   }
 
   renderChatList();
+  updateToolbarActions();
+  closeSearchPanel();
+  // Make sure we're in chat view, not overview
+  if (!overviewView.classList.contains('hidden')) {
+    closeOverviewView();
+  }
 }
 
 // Start rename chat
@@ -464,7 +543,9 @@ function renderMessages(messages) {
     const messageEl = createMessageElement(msg.role, msg.content, {
       showTimestamp: showTimestamps,
       renderMarkdown: renderMarkdown,
-      messageIndex: index
+      messageIndex: index,
+      thinking: msg.thinking,  // Pass thinking blocks from history
+      toolUses: msg.toolUses   // Pass tool uses from history
     });
     messagesDiv.appendChild(messageEl);
   });
@@ -474,7 +555,7 @@ function renderMessages(messages) {
 
 // Create message element
 function createMessageElement(role, content, options = {}) {
-  const { showTimestamp = false, renderMarkdown = false, isStreaming = false, messageIndex = -1 } = options;
+  const { showTimestamp = false, renderMarkdown = false, isStreaming = false, messageIndex = -1, thinking = null, toolUses = null } = options;
 
   const messageEl = document.createElement('div');
   messageEl.className = `message ${role}${isStreaming ? ' streaming' : ''}`;
@@ -486,6 +567,57 @@ function createMessageElement(role, content, options = {}) {
   roleEl.textContent = role === 'user' ? 'You' : 'Claude';
   messageEl.appendChild(roleEl);
 
+  // Add thinking blocks if present (for assistant messages loaded from history)
+  if (role === 'assistant' && thinking && Array.isArray(thinking) && thinking.length > 0) {
+    thinking.forEach((thinkingContent, blockIndex) => {
+      const thinkingEl = document.createElement('div');
+      // Start collapsed unless showThinkingByDefault is enabled
+      const isCollapsed = !settings.showThinkingByDefault;
+      thinkingEl.className = `thinking-block${isCollapsed ? ' collapsed' : ''}`;
+      thinkingEl.dataset.index = blockIndex;
+      thinkingEl.innerHTML = `
+        <div class="thinking-block-header">
+          <i class="ph ph-brain"></i>
+          <span>Thinking${blockIndex > 0 ? ` (${blockIndex + 1})` : ''}</span>
+          <i class="ph ph-caret-down toggle-icon"></i>
+        </div>
+        <div class="thinking-block-content">${escapeHtml(thinkingContent)}</div>
+      `;
+
+      // Add click handler for collapse/expand
+      const header = thinkingEl.querySelector('.thinking-block-header');
+      header.addEventListener('click', () => {
+        thinkingEl.classList.toggle('collapsed');
+      });
+
+      messageEl.appendChild(thinkingEl);
+    });
+  }
+
+  // Add tool uses if present (for assistant messages loaded from history)
+  if (role === 'assistant' && toolUses && Array.isArray(toolUses) && toolUses.length > 0) {
+    toolUses.forEach((toolUse) => {
+      const toolEl = document.createElement('div');
+      toolEl.className = 'tool-use-block tool-use-inline';
+
+      const icon = 'ph-globe-simple';
+      const displayName = 'Fetched';
+      const target = toolUse.input.url || JSON.stringify(toolUse.input);
+
+      toolEl.innerHTML = `
+        <div class="tool-use-header">
+          <i class="ph ph-wrench"></i>
+          <span>Used tools</span>
+        </div>
+        <div class="tool-use-content">
+          <div class="tool-use-item"><i class="ph ${icon}"></i> ${displayName}: ${escapeHtml(String(target))}</div>
+        </div>
+      `;
+
+      messageEl.appendChild(toolEl);
+    });
+  }
+
   const contentEl = document.createElement('div');
   contentEl.className = `message-content${renderMarkdown ? ' markdown' : ''}`;
   if (isStreaming) {
@@ -493,7 +625,7 @@ function createMessageElement(role, content, options = {}) {
   }
 
   if (isStreaming && !content) {
-    contentEl.innerHTML = '<div class="loading-dots"><span></span><span></span><span></span></div>';
+    // Empty content element - the input container pulses to show loading state
   } else if (renderMarkdown) {
     contentEl.innerHTML = renderMarkdownContent(content);
   } else {
@@ -618,8 +750,7 @@ function editMessage(messageIndex, currentContent) {
 async function submitEditedMessage(messageIndex, newContent) {
   if (isLoading) return;
 
-  isLoading = true;
-  sendBtn.disabled = true;
+  setLoading(true);
 
   try {
     // Edit the message on the backend
@@ -648,28 +779,6 @@ async function submitEditedMessage(messageIndex, newContent) {
     if (chat) {
       chat.messages = result.chat.messages;
     }
-
-    // If not streaming, update the message directly
-    if (!result.streamed) {
-      const streamingEl = document.getElementById('streaming-message');
-      if (streamingEl) {
-        const renderMarkdown = settings.enabledToggles.includes('markdown');
-        const contentEl = streamingEl.querySelector('.message-content');
-        contentEl.className = `message-content${renderMarkdown ? ' markdown' : ''}`;
-
-        if (renderMarkdown) {
-          contentEl.innerHTML = renderMarkdownContent(result.message);
-        } else {
-          contentEl.textContent = result.message;
-        }
-
-        streamingEl.removeAttribute('id');
-        streamingEl.classList.remove('streaming');
-      }
-
-      // Re-render to add actions
-      renderMessages(result.chat.messages);
-    }
   } catch (error) {
     console.error('Error editing message:', error);
     const errorEl = createMessageElement('assistant', `Error: ${error.message || 'Failed to send message'}`);
@@ -677,17 +786,14 @@ async function submitEditedMessage(messageIndex, newContent) {
     messagesDiv.appendChild(errorEl);
   }
 
-  isLoading = false;
-  sendBtn.disabled = false;
-  scrollToBottom();
+  setLoading(false);
 }
 
 // Regenerate assistant message
 async function regenerateMessage(messageIndex) {
   if (isLoading) return;
 
-  isLoading = true;
-  sendBtn.disabled = true;
+  setLoading(true);
 
   // Remove the message and all after it from UI
   const chat = chats.find(c => c.id === currentChatId);
@@ -709,28 +815,6 @@ async function regenerateMessage(messageIndex) {
 
     // Update local chat data
     chat.messages = result.chat.messages;
-
-    // If not streaming, update the message directly
-    if (!result.streamed) {
-      const streamingEl = document.getElementById('streaming-message');
-      if (streamingEl) {
-        const renderMarkdown = settings.enabledToggles.includes('markdown');
-        const contentEl = streamingEl.querySelector('.message-content');
-        contentEl.className = `message-content${renderMarkdown ? ' markdown' : ''}`;
-
-        if (renderMarkdown) {
-          contentEl.innerHTML = renderMarkdownContent(result.message);
-        } else {
-          contentEl.textContent = result.message;
-        }
-
-        streamingEl.removeAttribute('id');
-        streamingEl.classList.remove('streaming');
-      }
-
-      // Re-render to add actions
-      renderMessages(result.chat.messages);
-    }
   } catch (error) {
     console.error('Error regenerating message:', error);
 
@@ -746,9 +830,7 @@ async function regenerateMessage(messageIndex) {
     messagesDiv.appendChild(errorEl);
   }
 
-  isLoading = false;
-  sendBtn.disabled = false;
-  scrollToBottom();
+  setLoading(false);
 }
 
 // Check if HTML is a valid complete document
@@ -939,7 +1021,7 @@ function renderMarkdownContent(text, isStreaming = false) {
       }
     });
     tableHtml += '</tbody></table>';
-    return tableHtml;
+    return tableHtml + '\n';
   });
 
   // Strikethrough (GFM)
@@ -1016,6 +1098,9 @@ function renderMarkdownContent(text, isStreaming = false) {
   html = html.replace(/<p>(<hr>)<\/p>/g, '$1');
   html = html.replace(/<p><br>/g, '<p>');
   html = html.replace(/<br><\/p>/g, '</p>');
+  // Clean up br before and after hr
+  html = html.replace(/<br>\s*<hr>/g, '<hr>');
+  html = html.replace(/<hr>\s*<br>/g, '<hr>');
 
   return html;
 }
@@ -1060,10 +1145,9 @@ async function sendMessage() {
 
   scrollToBottom();
 
-  isLoading = true;
+  setLoading(true);
   userScrolledDuringStream = false; // Reset scroll tracking for new message
   currentContentSegment = 0; // Reset for new message
-  sendBtn.disabled = true;
 
   // Generate title in background for first message
   if (isFirstMessage) {
@@ -1083,27 +1167,6 @@ async function sendMessage() {
     if (chat) {
       chat.messages = result.chat.messages;
     }
-
-    // If not streaming, update the message directly
-    if (!result.streamed) {
-      const streamingEl = document.getElementById('streaming-message');
-      if (streamingEl) {
-        const contentEl = streamingEl.querySelector('.message-content');
-        contentEl.className = `message-content${renderMarkdown ? ' markdown' : ''}`;
-
-        if (renderMarkdown) {
-          contentEl.innerHTML = renderMarkdownContent(result.message);
-        } else {
-          contentEl.textContent = result.message;
-        }
-
-        streamingEl.removeAttribute('id');
-        streamingEl.classList.remove('streaming');
-      }
-
-      // Re-render to add actions
-      renderMessages(result.chat.messages);
-    }
   } catch (error) {
     console.error('Error sending message:', error);
 
@@ -1119,9 +1182,7 @@ async function sendMessage() {
     messagesDiv.appendChild(errorEl);
   }
 
-  isLoading = false;
-  sendBtn.disabled = false;
-  scrollToBottom();
+  setLoading(false);
 }
 
 // Track if user has scrolled up during streaming
@@ -1212,8 +1273,7 @@ function finalizeStreamingMessage() {
     streamingEl.dataset.index = messageIndex;
   }
 
-  isLoading = false;
-  sendBtn.disabled = false;
+  setLoading(false);
   userScrolledDuringStream = false; // Reset scroll tracking
 }
 
@@ -1225,15 +1285,24 @@ function showThinkingBlock(thinking, blockIndex = 0) {
     let thinkingEl = streamingEl.querySelector(`.thinking-block[data-index="${blockIndex}"]`);
     if (!thinkingEl) {
       thinkingEl = document.createElement('div');
-      thinkingEl.className = 'thinking-block';
+      // Start collapsed unless showThinkingByDefault is enabled
+      const isCollapsed = !settings.showThinkingByDefault;
+      thinkingEl.className = `thinking-block${isCollapsed ? ' collapsed' : ''}`;
       thinkingEl.dataset.index = blockIndex;
       thinkingEl.innerHTML = `
         <div class="thinking-block-header">
           <i class="ph ph-brain"></i>
           <span>Thinking${blockIndex > 0 ? ` (${blockIndex + 1})` : ''}...</span>
+          <i class="ph ph-caret-down toggle-icon"></i>
         </div>
         <div class="thinking-block-content"></div>
       `;
+
+      // Add click handler for collapse/expand
+      const header = thinkingEl.querySelector('.thinking-block-header');
+      header.addEventListener('click', () => {
+        thinkingEl.classList.toggle('collapsed');
+      });
 
       if (blockIndex === 0) {
         // For first thinking block, insert after message-role at the start
@@ -1414,6 +1483,169 @@ function renderToggles() {
 
     togglesList.appendChild(item);
   });
+}
+
+// Toggle search panel visibility
+function toggleSearchPanel() {
+  const isHidden = searchPanel.classList.contains('hidden');
+  if (isHidden) {
+    searchPanel.classList.remove('hidden');
+    messageSearchInput.focus();
+  } else {
+    closeSearchPanel();
+  }
+}
+
+// Close search panel
+function closeSearchPanel() {
+  searchPanel.classList.add('hidden');
+  messageSearchInput.value = '';
+  searchResults.innerHTML = '';
+}
+
+// Perform message search
+function performMessageSearch(query) {
+  const chat = chats.find(c => c.id === currentChatId);
+  if (!chat || !query.trim()) {
+    searchResults.innerHTML = '';
+    return;
+  }
+
+  const searchTerm = query.toLowerCase().trim();
+  const results = [];
+
+  chat.messages.forEach((msg, index) => {
+    if (msg.content.toLowerCase().includes(searchTerm)) {
+      results.push({ ...msg, index });
+    }
+  });
+
+  if (results.length === 0) {
+    searchResults.innerHTML = '<div class="search-no-results">No messages found</div>';
+    return;
+  }
+
+  searchResults.innerHTML = results.map(result => {
+    const content = result.content;
+    const lowerContent = content.toLowerCase();
+    const matchIndex = lowerContent.indexOf(searchTerm);
+
+    // Get a snippet around the match
+    const snippetStart = Math.max(0, matchIndex - 30);
+    const snippetEnd = Math.min(content.length, matchIndex + searchTerm.length + 50);
+    let snippet = content.substring(snippetStart, snippetEnd);
+
+    // Add ellipsis if needed
+    if (snippetStart > 0) snippet = '...' + snippet;
+    if (snippetEnd < content.length) snippet = snippet + '...';
+
+    // Highlight the search term
+    const highlightedSnippet = snippet.replace(
+      new RegExp(`(${escapeRegex(query)})`, 'gi'),
+      '<mark>$1</mark>'
+    );
+
+    return `
+      <div class="search-result-item ${result.role}" data-index="${result.index}">
+        <div class="search-result-role">${result.role === 'user' ? 'You' : 'Claude'}</div>
+        <div class="search-result-content">${highlightedSnippet}</div>
+      </div>
+    `;
+  }).join('');
+
+  // Add click handlers to search results
+  searchResults.querySelectorAll('.search-result-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const index = parseInt(item.dataset.index);
+      scrollToMessage(index);
+      closeSearchPanel();
+    });
+  });
+}
+
+// Escape regex special characters
+function escapeRegex(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Scroll to a specific message
+function scrollToMessage(index) {
+  const messageEl = messagesDiv.querySelector(`[data-index="${index}"]`);
+  if (messageEl) {
+    messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Highlight briefly
+    messageEl.style.transition = 'background 0.3s ease';
+    messageEl.style.background = 'var(--primary-subtle)';
+    setTimeout(() => {
+      messageEl.style.background = '';
+    }, 1500);
+  }
+}
+
+// Show overview view
+function showOverviewView() {
+  const chat = chats.find(c => c.id === currentChatId);
+  if (!chat) return;
+
+  // Hide normal view, show overview
+  topBar.classList.add('hidden');
+  overviewTopBar.classList.remove('hidden');
+  overviewChatTitle.textContent = chat.name;
+  messagesContainer.classList.add('hidden');
+  overviewView.classList.remove('hidden');
+  searchPanel.classList.add('hidden');
+  document.querySelector('.input-area').classList.add('hidden');
+
+  // Render overview cards
+  renderOverviewCards(chat.messages);
+}
+
+// Close overview view
+function closeOverviewView(scrollToIndex = null) {
+  // Show normal view, hide overview
+  topBar.classList.remove('hidden');
+  overviewTopBar.classList.add('hidden');
+  messagesContainer.classList.remove('hidden');
+  overviewView.classList.add('hidden');
+  document.querySelector('.input-area').classList.remove('hidden');
+
+  // Scroll to specific message if provided
+  if (scrollToIndex !== null) {
+    setTimeout(() => scrollToMessage(scrollToIndex), 100);
+  }
+}
+
+// Render overview cards
+function renderOverviewCards(messages) {
+  overviewCards.innerHTML = messages.map((msg, index) => {
+    // Get first 20 words
+    const words = msg.content.trim().split(/\s+/);
+    const preview = words.slice(0, 20).join(' ') + (words.length > 20 ? '...' : '');
+
+    return `
+      <div class="overview-card ${msg.role}" data-index="${index}">
+        <div class="overview-card-role">${msg.role === 'user' ? 'You' : 'Claude'}</div>
+        <div class="overview-card-content">${escapeHtml(preview)}</div>
+      </div>
+    `;
+  }).join('');
+
+  // Add click handlers
+  overviewCards.querySelectorAll('.overview-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const index = parseInt(card.dataset.index);
+      closeOverviewView(index);
+    });
+  });
+}
+
+// Update toolbar visibility based on current chat
+function updateToolbarActions() {
+  if (currentChatId) {
+    toolbarChatActions.classList.remove('hidden');
+  } else {
+    toolbarChatActions.classList.add('hidden');
+  }
 }
 
 // Initialize the app

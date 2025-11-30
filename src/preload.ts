@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   saveMode: (mode: string) => ipcRenderer.invoke('save-mode', mode),
   saveToggles: (toggles: string[]) => ipcRenderer.invoke('save-toggles', toggles),
   saveDebugFeatures: (enabled: boolean) => ipcRenderer.invoke('save-debug-features', enabled),
+  saveShowThinkingByDefault: (enabled: boolean) => ipcRenderer.invoke('save-show-thinking-by-default', enabled),
 
   // Modes and toggles
   getModes: () => ipcRenderer.invoke('get-modes'),

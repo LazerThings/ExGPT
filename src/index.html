@@ -64,6 +64,13 @@
         </div>
         <div class="form-group">
           <label class="toggle-label">
+            <input type="checkbox" id="show-thinking-checkbox">
+            <span>Show thinking by default</span>
+          </label>
+          <p class="hint">Extended thinking blocks will be expanded by default instead of collapsed.</p>
+        </div>
+        <div class="form-group">
+          <label class="toggle-label">
             <input type="checkbox" id="debug-features-checkbox">
             <span>Enable Debug Features</span>
           </label>
@@ -76,13 +83,47 @@
   <!-- Main Content -->
   <main id="main-content" class="main-content">
     <!-- Top Bar -->
-    <header class="top-bar">
+    <header class="top-bar" id="top-bar">
       <button id="toggle-left-sidebar" class="icon-btn" title="Toggle Sidebar">
         <i class="ph ph-sidebar-simple"></i>
       </button>
       <h1 id="current-chat-title">ExGPT</h1>
       <div class="spacer"></div>
+      <div id="toolbar-chat-actions" class="toolbar-actions">
+        <button id="search-messages-btn" class="icon-btn" title="Search messages">
+          <i class="ph ph-magnifying-glass"></i>
+        </button>
+        <button id="overview-btn" class="icon-btn" title="Message overview">
+          <i class="ph ph-rows"></i>
+        </button>
+      </div>
     </header>
+
+    <!-- Overview Top Bar (hidden by default) -->
+    <header class="top-bar overview-top-bar hidden" id="overview-top-bar">
+      <h1 id="overview-chat-title">ExGPT</h1>
+      <div class="spacer"></div>
+      <button id="close-overview-btn" class="icon-btn" title="Close overview">
+        <i class="ph ph-x"></i>
+      </button>
+    </header>
+
+    <!-- Search Panel (hidden by default) -->
+    <div id="search-panel" class="search-panel hidden">
+      <div class="search-panel-input-wrapper">
+        <i class="ph ph-magnifying-glass"></i>
+        <input type="text" id="message-search-input" placeholder="Search messages...">
+        <button id="close-search-btn" class="icon-btn" title="Close search">
+          <i class="ph ph-x"></i>
+        </button>
+      </div>
+      <div id="search-results" class="search-results"></div>
+    </div>
+
+    <!-- Overview View (hidden by default) -->
+    <div id="overview-view" class="overview-view hidden">
+      <div id="overview-cards" class="overview-cards"></div>
+    </div>
 
     <!-- Messages Area -->
     <div id="messages-container" class="messages-container">
