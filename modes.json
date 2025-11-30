@@ -62,5 +62,16 @@
     "maxTokens": 32000,
     "extendedThinking": true,
     "thinkingBudget": 10000
+  },
+  {
+    "name": "eli5",
+    "display-name": "ELI5",
+    "icon": "ph-number-square-five",
+    "description": "Simple explanations anyone can understand.\nUses Claude Haiku 4.5 with extended thinking.",
+    "prompt": "Explain complex topics in simple terms that anyone can understand. Think deeply about how to break down difficult concepts into easy, clear explanations. Use everyday examples and analogies. Avoid jargon unless you explain it simply. Make explanations quick and accessible.",
+    "model": "claude-haiku-4-5-20251001",
+    "maxTokens": 6000,
+    "extendedThinking": true,
+    "thinkingBudget": 6000
   }
 ]
