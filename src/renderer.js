@@ -21,12 +21,15 @@ const settingsModal = document.getElementById('settings-modal');
 const closeSettingsBtn = document.getElementById('close-settings');
 const apiKeyInput = document.getElementById('api-key-input');
 const saveApiKeyBtn = document.getElementById('save-api-key');
+const wolframAppIdInput = document.getElementById('wolfram-app-id-input');
+const saveWolframAppIdBtn = document.getElementById('save-wolfram-app-id');
 
 const modesList = document.getElementById('modes-list');
 const togglesList = document.getElementById('toggles-list');
 const darkModeBtn = document.getElementById('dark-mode-btn');
 const debugFeaturesCheckbox = document.getElementById('debug-features-checkbox');
 const showThinkingCheckbox = document.getElementById('show-thinking-checkbox');
+const themeSelect = document.getElementById('theme-select');
 
 // Search and Overview elements
 const topBar = document.getElementById('top-bar');
@@ -81,6 +84,7 @@ async function init() {
   renderModes();
   renderToggles();
   await updateApiKeyHint();
+  await updateWolframAppIdHint();
   updateDebugFeaturesCheckbox();
   updateShowThinkingCheckbox();
   updateToolbarActions();
@@ -124,6 +128,19 @@ async function updateApiKeyHint() {
     hint.textContent = 'Your API key is stored securely in your system keychain.';
   } else {
     hint.textContent = 'Your API key is stored securely and encrypted locally. Use $ENV_VAR to reference an environment variable (e.g. $ANTHROPIC_API_KEY).';
+  }
+}
+
+// Update Wolfram App ID hint based on whether app is packaged
+async function updateWolframAppIdHint() {
+  const hint = document.getElementById('wolfram-app-id-hint');
+  if (!hint) return;
+
+  const isPackaged = await window.api.isPackaged();
+  if (isPackaged) {
+    hint.innerHTML = 'Your App ID is stored securely in your system keychain. Get one at <a href="https://developer.wolframalpha.com/" target="_blank" rel="noopener">developer.wolframalpha.com</a>';
+  } else {
+    hint.innerHTML = 'Your App ID is stored securely and encrypted locally. Get one at <a href="https://developer.wolframalpha.com/" target="_blank" rel="noopener">developer.wolframalpha.com</a>';
   }
 }
 
@@ -182,7 +199,15 @@ function setupEventListeners() {
   newChatBtn.addEventListener('click', showNewChatScreen);
 
   // Settings
-  settingsBtn.addEventListener('click', () => {
+  settingsBtn.addEventListener('click', async () => {
+    // Update placeholders based on saved values
+    const displaySettings = await window.api.getSettings();
+    if (displaySettings.apiKey) {
+      apiKeyInput.placeholder = displaySettings.apiKey;
+    }
+    if (displaySettings.wolframAppId) {
+      wolframAppIdInput.placeholder = displaySettings.wolframAppId;
+    }
     settingsModal.classList.add('open');
   });
 
@@ -206,6 +231,19 @@ function setupEventListeners() {
     }
   });
 
+  // Wolfram App ID save button
+  saveWolframAppIdBtn.addEventListener('click', async () => {
+    const appId = wolframAppIdInput.value.trim();
+    if (appId) {
+      await window.api.saveWolframAppId(appId);
+      settings.wolframAppId = appId; // Update local settings so toggle enables
+      wolframAppIdInput.value = '';
+      wolframAppIdInput.placeholder = '••••••••';
+      settingsModal.classList.remove('open');
+      renderToggles(); // Re-render to enable Wolfram toggle
+    }
+  });
+
   // Debug features checkbox
   debugFeaturesCheckbox.addEventListener('change', async () => {
     settings.debugFeatures = debugFeaturesCheckbox.checked;
@@ -225,6 +263,13 @@ function setupEventListeners() {
   showThinkingCheckbox.addEventListener('change', async () => {
     settings.showThinkingByDefault = showThinkingCheckbox.checked;
     await window.api.saveShowThinkingByDefault(showThinkingCheckbox.checked);
+  });
+
+  // Theme select dropdown
+  themeSelect.addEventListener('change', async () => {
+    settings.theme = themeSelect.value;
+    await window.api.saveTheme(themeSelect.value);
+    applyTheme();
   });
 
   // Message input - Enter for newline, Cmd/Ctrl+Enter to send
@@ -379,8 +424,30 @@ function setupKeyboardShortcuts() {
 // Apply theme based on darkmode toggle
 function applyTheme() {
   const isDarkMode = settings.enabledToggles.includes('darkmode');
+  const theme = settings.theme || 'vine';
+
+  // Parse theme into color and shape
+  // Themes: vine, vine-sharp, moss, moss-sharp
+  const isMoss = theme.startsWith('moss');
+  const isSharp = theme.endsWith('-sharp');
+
+  // Apply data attributes
+  document.documentElement.setAttribute('data-mode', isDarkMode ? 'dark' : 'light');
+  document.documentElement.setAttribute('data-color', isMoss ? 'moss' : 'vine');
+  document.documentElement.setAttribute('data-shape', isSharp ? 'sharp' : 'rounded');
+
+  // Keep legacy attribute for backwards compatibility
   document.documentElement.setAttribute('data-theme', isDarkMode ? 'dark' : 'light');
+
   updateDarkModeButton();
+  updateThemeSelect();
+}
+
+// Update theme select dropdown
+function updateThemeSelect() {
+  if (themeSelect) {
+    themeSelect.value = settings.theme || 'vine';
+  }
 }
 
 // Update the dark mode button icon
@@ -912,6 +979,38 @@ window.reloadLiveFrame = function(frameId) {
   }
 };
 
+// Copy code block to clipboard
+window.copyCodeBlock = async function(blockId) {
+  const pre = document.getElementById(blockId);
+  if (pre) {
+    const encodedContent = pre.dataset.code;
+    const content = decodeURIComponent(escape(atob(encodedContent)));
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch (error) {
+      console.error('Failed to copy code:', error);
+    }
+  }
+};
+
+// Download code block as file
+window.downloadCodeBlock = function(blockId, extension) {
+  const pre = document.getElementById(blockId);
+  if (pre) {
+    const encodedContent = pre.dataset.code;
+    const content = decodeURIComponent(escape(atob(encodedContent)));
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `code.${extension}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+};
+
 // GFM Markdown renderer
 function renderMarkdownContent(text, isStreaming = false) {
   if (!text) return '';
@@ -964,6 +1063,7 @@ function renderMarkdownContent(text, isStreaming = false) {
 
   // Fenced code blocks with language
   const syntaxHighlightEnabled = settings.enabledToggles.includes('syntaxhighlight');
+  let codeBlockCounter = 0;
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
     // Unescape HTML entities for proper highlighting (content was escaped earlier)
     const codeContent = code.trim()
@@ -973,35 +1073,48 @@ function renderMarkdownContent(text, isStreaming = false) {
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'");
 
+    const blockId = `code-block-${Date.now()}-${codeBlockCounter++}`;
+    const displayLang = lang || 'code';
+    const extension = lang || 'txt';
+
+    // Store code content for copy/download (base64 encode to safely embed)
+    const encodedContent = btoa(unescape(encodeURIComponent(codeContent)));
+
+    const header = `<div class="code-block-header"><span class="code-block-lang">${displayLang}</span><div class="code-block-actions"><button class="code-block-btn" onclick="copyCodeBlock('${blockId}')" title="Copy code"><i class="ph ph-copy"></i></button><button class="code-block-btn" onclick="downloadCodeBlock('${blockId}', '${extension}')" title="Download file"><i class="ph ph-download-simple"></i></button></div></div>`;
+
+    let codeHtml;
     if (syntaxHighlightEnabled && typeof hljs !== 'undefined' && lang) {
       try {
         // Try to highlight with the specified language
         const highlighted = hljs.highlight(codeContent, { language: lang, ignoreIllegals: true });
-        return `<pre><code class="hljs language-${lang}">${highlighted.value}</code></pre>`;
+        codeHtml = `<code class="hljs language-${lang}">${highlighted.value}</code>`;
       } catch (e) {
         // Fall back to auto-detection or plain text
         try {
           const highlighted = hljs.highlightAuto(codeContent);
-          return `<pre><code class="hljs">${highlighted.value}</code></pre>`;
+          codeHtml = `<code class="hljs">${highlighted.value}</code>`;
         } catch (e2) {
           // Re-escape for non-highlighted display
           const escaped = codeContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-          return `<pre><code class="language-${lang}">${escaped}</code></pre>`;
+          codeHtml = `<code class="language-${lang}">${escaped}</code>`;
         }
       }
     } else if (syntaxHighlightEnabled && typeof hljs !== 'undefined') {
       // No language specified, try auto-detection
       try {
         const highlighted = hljs.highlightAuto(codeContent);
-        return `<pre><code class="hljs">${highlighted.value}</code></pre>`;
+        codeHtml = `<code class="hljs">${highlighted.value}</code>`;
       } catch (e) {
         const escaped = codeContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        return `<pre><code>${escaped}</code></pre>`;
+        codeHtml = `<code>${escaped}</code>`;
       }
+    } else {
+      // Re-escape for non-highlighted display
+      const escaped = codeContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      codeHtml = `<code class="language-${lang}">${escaped}</code>`;
     }
-    // Re-escape for non-highlighted display
-    const escaped = codeContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return `<pre><code class="language-${lang}">${escaped}</code></pre>`;
+
+    return `<div class="code-block-container">${header}<pre id="${blockId}" data-code="${encodedContent}">${codeHtml}</pre></div>`;
   });
 
   // Inline code (must come after code blocks)
@@ -1103,6 +1216,10 @@ function renderMarkdownContent(text, isStreaming = false) {
   html = html.replace(/(<\/h[1-4]>)<\/p>/g, '$1');
   html = html.replace(/<p>(<pre>)/g, '$1');
   html = html.replace(/(<\/pre>)<\/p>/g, '$1');
+  html = html.replace(/<p>(<div class="code-block-container">)/g, '$1');
+  html = html.replace(/(<\/div>)<\/p>(\s*<div class="code-block-container">)/g, '$1$2');
+  html = html.replace(/<br>(<div class="code-block-container">)/g, '$1');
+  html = html.replace(/(<\/div>)<br>/g, '$1');
   html = html.replace(/<p>(<ul)/g, '$1');
   html = html.replace(/(<\/ul>)<\/p>/g, '$1');
   html = html.replace(/<p>(<table>)/g, '$1');
@@ -1354,9 +1471,16 @@ function showToolUse(tools) {
     toolEl.className = 'tool-use-block tool-use-inline';
 
     const toolNames = tools.map(t => {
-      const icon = 'ph-globe-simple';
-      const displayName = 'Fetching';
-      const target = t.input.url;
+      let icon, displayName, target;
+      if (t.name === 'wolfram_alpha') {
+        icon = 'ph-cpu';
+        displayName = 'Querying Wolfram Alpha';
+        target = t.input.query;
+      } else {
+        icon = 'ph-globe-simple';
+        displayName = 'Fetching';
+        target = t.input.url;
+      }
       return `<div class="tool-use-item"><i class="ph ${icon}"></i> ${displayName}: ${target}</div>`;
     }).join('');
 
@@ -1450,12 +1574,17 @@ function renderToggles() {
     const item = document.createElement('div');
     const isActive = settings.enabledToggles.includes(toggle.name);
     const dependencySatisfied = isToggleDependencySatisfied(toggle);
-    const isDisabled = !dependencySatisfied;
+
+    // Check if Wolfram toggle needs App ID
+    const needsWolframAppId = toggle.name === 'wolfram' && !settings.wolframAppId;
+    const isDisabled = !dependencySatisfied || needsWolframAppId;
 
     item.className = `toggle-item${isActive && !isDisabled ? ' active' : ''}${isDisabled ? ' disabled' : ''}`;
     item.dataset.toggle = toggle.name;
 
-    if (isDisabled && toggle.dependsOn) {
+    if (needsWolframAppId) {
+      item.title = 'Add a Wolfram Alpha App ID in Settings';
+    } else if (isDisabled && toggle.dependsOn) {
       item.title = `Disabled. Dependent on: ${getToggleDisplayName(toggle.dependsOn)}`;
     }
 

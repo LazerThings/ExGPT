@@ -63,6 +63,24 @@
           <p class="hint" id="api-key-hint">Your API key is stored securely and encrypted locally.</p>
         </div>
         <div class="form-group">
+          <label for="wolfram-app-id-input">Wolfram Alpha App ID</label>
+          <div class="input-with-btn">
+            <input type="password" id="wolfram-app-id-input" placeholder="XXXXXX-XXXXXXXXXX">
+            <button id="save-wolfram-app-id" class="btn btn-primary">Save</button>
+          </div>
+          <p class="hint" id="wolfram-app-id-hint">Get a free App ID at <a href="https://developer.wolframalpha.com/" target="_blank" rel="noopener">developer.wolframalpha.com</a></p>
+        </div>
+        <div class="form-group">
+          <label for="theme-select">Theme</label>
+          <select id="theme-select" class="form-select">
+            <option value="vine">Vine</option>
+            <option value="vine-sharp">Vine Sharp</option>
+            <option value="moss">Moss</option>
+            <option value="moss-sharp">Moss Sharp</option>
+          </select>
+          <p class="hint">Choose the visual theme for the app.</p>
+        </div>
+        <div class="form-group">
           <label class="toggle-label">
             <input type="checkbox" id="show-thinking-checkbox">
             <span>Show thinking by default</span>

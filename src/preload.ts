@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('api', {
   saveToggles: (toggles: string[]) => ipcRenderer.invoke('save-toggles', toggles),
   saveDebugFeatures: (enabled: boolean) => ipcRenderer.invoke('save-debug-features', enabled),
   saveShowThinkingByDefault: (enabled: boolean) => ipcRenderer.invoke('save-show-thinking-by-default', enabled),
+  saveWolframAppId: (appId: string) => ipcRenderer.invoke('save-wolfram-app-id', appId),
+  saveTheme: (theme: string) => ipcRenderer.invoke('save-theme', theme),
 
   // Modes and toggles
   getModes: () => ipcRenderer.invoke('get-modes'),
