@@ -33,6 +33,8 @@ interface Settings {
   enabledToggles: string[];
   debugFeatures?: boolean;
   showThinkingByDefault?: boolean;
+  wolframAppId?: string;
+  theme?: string;
 }
 
 interface Mode {
@@ -163,6 +165,12 @@ Apply these styles consistently to make live HTML previews feel integrated with 
     prompt: 'You have access to a web_fetch tool that lets you fetch and read the content of web pages. Use it when you need to read a specific URL the user provides or when you need more details from a search result.',
   },
   {
+    name: 'wolfram',
+    displayName: 'Wolfram Alpha',
+    icon: 'ph-cpu',
+    prompt: 'You have access to a wolfram_alpha tool that lets you query Wolfram Alpha for computational knowledge, math calculations, unit conversions, scientific data, statistics, and factual information. Use it for precise calculations, data lookups, or when you need authoritative answers to computational or factual questions.',
+  },
+  {
     name: 'debuginfo',
     displayName: 'Debug Info',
     icon: 'ph-bug',
@@ -185,6 +193,20 @@ const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ['url'],
+    },
+  },
+  {
+    name: 'wolfram_alpha',
+    description: 'Query Wolfram Alpha for computational knowledge, math calculations, unit conversions, scientific data, statistics, and factual information. Returns a text response with the computed results.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'The query to send to Wolfram Alpha (e.g., "integrate x^2", "population of France", "convert 100 miles to km")',
+        },
+      },
+      required: ['query'],
     },
   },
 ];
@@ -235,6 +257,57 @@ async function executeWebFetch(url: string): Promise<string> {
   });
 }
 
+// Execute Wolfram Alpha query
+async function executeWolframAlpha(query: string): Promise<string> {
+  const settings = loadSettings();
+  const appId = settings.wolframAppId;
+
+  if (!appId) {
+    return 'Wolfram Alpha App ID not configured. Please set your App ID in Settings.';
+  }
+
+  return new Promise((resolve) => {
+    try {
+      const encodedQuery = encodeURIComponent(query);
+      const url = `https://www.wolframalpha.com/api/v1/llm-api?input=${encodedQuery}&appid=${appId}`;
+
+      const request = net.request(url);
+      let data = '';
+
+      request.on('response', (response) => {
+        response.on('data', (chunk) => {
+          data += chunk.toString();
+        });
+
+        response.on('end', () => {
+          if (response.statusCode === 200) {
+            // Limit response size
+            let result = data.trim();
+            if (result.length > 15000) {
+              result = result.substring(0, 15000) + '\n\n[Content truncated...]';
+            }
+            resolve(`Wolfram Alpha result for "${query}":\n\n${result}`);
+          } else if (response.statusCode === 501) {
+            resolve(`Wolfram Alpha could not understand the query: "${query}". Try rephrasing.`);
+          } else if (response.statusCode === 403) {
+            resolve('Wolfram Alpha API access denied. Please check your App ID is valid.');
+          } else {
+            resolve(`Wolfram Alpha error (${response.statusCode}): ${data}`);
+          }
+        });
+      });
+
+      request.on('error', (error) => {
+        resolve(`Failed to query Wolfram Alpha: ${error.message}`);
+      });
+
+      request.end();
+    } catch (error) {
+      resolve(`Failed to query Wolfram Alpha: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  });
+}
+
 // Build debug info prompt showing configured vs actual settings
 function buildDebugInfo(settings: Settings, selectedMode: Mode | undefined, enabledToggles: Toggle[]): string {
   const modeConfig = selectedMode ? {
@@ -247,7 +320,7 @@ function buildDebugInfo(settings: Settings, selectedMode: Mode | undefined, enab
   } : null;
 
   // Check if extended thinking will actually be used
-  const hasToolsEnabled = settings.enabledToggles.includes('webfetch');
+  const hasToolsEnabled = settings.enabledToggles.includes('webfetch') || settings.enabledToggles.includes('wolfram');
   const willUseThinking = selectedMode?.extendedThinking && selectedMode?.thinkingBudget;
   const usesInterleavedThinking = hasToolsEnabled && willUseThinking;
 
@@ -278,6 +351,8 @@ async function executeTool(name: string, input: Record<string, unknown>): Promis
   switch (name) {
     case 'web_fetch':
       return executeWebFetch(input.url as string);
+    case 'wolfram_alpha':
+      return executeWolframAlpha(input.query as string);
     default:
       return `Unknown tool: ${name}`;
   }
@@ -322,6 +397,11 @@ function loadSettings(): Settings {
         data.apiKey = safeStorage.decryptString(Buffer.from(data.apiKeyEncrypted, 'base64'));
         delete data.apiKeyEncrypted;
       }
+      // Decrypt Wolfram App ID if it exists
+      if (data.wolframAppIdEncrypted && safeStorage.isEncryptionAvailable()) {
+        data.wolframAppId = safeStorage.decryptString(Buffer.from(data.wolframAppIdEncrypted, 'base64'));
+        delete data.wolframAppIdEncrypted;
+      }
       return data;
     }
   } catch {
@@ -336,6 +416,11 @@ function saveSettings(settings: Settings): void {
   if (settings.apiKey && safeStorage.isEncryptionAvailable()) {
     toSave.apiKeyEncrypted = safeStorage.encryptString(settings.apiKey).toString('base64');
     delete toSave.apiKey;
+  }
+  // Encrypt Wolfram App ID if possible
+  if (settings.wolframAppId && safeStorage.isEncryptionAvailable()) {
+    toSave.wolframAppIdEncrypted = safeStorage.encryptString(settings.wolframAppId).toString('base64');
+    delete toSave.wolframAppId;
   }
   fs.writeFileSync(settingsPath, JSON.stringify(toSave, null, 2));
 }
@@ -459,7 +544,8 @@ ipcMain.handle('get-settings', () => {
   const settings = loadSettings();
   // Show env var name if it's an env var, otherwise mask it
   const displayKey = settings.apiKey?.startsWith('$') ? settings.apiKey : (settings.apiKey ? '••••••••' : '');
-  return { ...settings, apiKey: displayKey };
+  const displayWolframId = settings.wolframAppId ? '••••••••' : '';
+  return { ...settings, apiKey: displayKey, wolframAppId: displayWolframId };
 });
 
 ipcMain.handle('save-api-key', (_, apiKey: string) => {
@@ -500,6 +586,20 @@ ipcMain.handle('save-debug-features', (_, enabled: boolean) => {
 ipcMain.handle('save-show-thinking-by-default', (_, enabled: boolean) => {
   const settings = loadSettings();
   settings.showThinkingByDefault = enabled;
+  saveSettings(settings);
+  return true;
+});
+
+ipcMain.handle('save-wolfram-app-id', (_, appId: string) => {
+  const settings = loadSettings();
+  settings.wolframAppId = appId;
+  saveSettings(settings);
+  return true;
+});
+
+ipcMain.handle('save-theme', (_, theme: string) => {
+  const settings = loadSettings();
+  settings.theme = theme;
   saveSettings(settings);
   return true;
 });
@@ -565,6 +665,9 @@ ipcMain.handle('send-message', async (_, chatId: string, userMessage: string) =>
   const enabledToolNames: string[] = [];
   if (settings.enabledToggles.includes('webfetch')) {
     enabledToolNames.push('web_fetch');
+  }
+  if (settings.enabledToggles.includes('wolfram')) {
+    enabledToolNames.push('wolfram_alpha');
   }
   const enabledTools = TOOLS.filter(t => enabledToolNames.includes(t.name));
   const hasTools = enabledTools.length > 0;
