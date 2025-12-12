@@ -75,7 +75,7 @@ const TOGGLES: Toggle[] = [
     name: 'livehtml',
     displayName: 'Live HTML',
     icon: 'ph-eyeglasses',
-    prompt: 'You can output live HTML previews using a special code block. Use ```live followed by a COMPLETE, properly formatted HTML document starting with <!DOCTYPE html> and including <html>, <head>, and <body> tags. The HTML will be rendered in a live preview frame. The document must be fully self-contained and valid.',
+    prompt: 'You can output live HTML previews using a special code block. Use ```live followed by a COMPLETE, properly formatted HTML document starting with <!DOCTYPE html> and including <html>, <head>, and <body> tags. The HTML will be rendered in a live preview frame. The document must be fully self-contained and valid. IMPORTANT: Please only use Live HTML when you think it is useful for the situation or the user asks you to use it. Do not use it in every case. Use it if it would provide additional visual aids or if interactivity is important. If normal text/markdown would work fine for the usecase, do not use Live HTML.',
     dependsOn: 'markdown',
   },
   {
